@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Unit extends Model
 {
@@ -26,5 +27,15 @@ class Unit extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class)->withPivot('clinic_id')->withTimestamps();
+    }
+
+    public function desks(): HasMany
+    {
+        return $this->hasMany(Desk::class);
+    }
+
+    public function tickets(): HasMany
+    {
+        return $this->hasMany(Ticket::class);
     }
 }

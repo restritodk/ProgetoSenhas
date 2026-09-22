@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Models\Clinic;
 use App\Models\Unit;
 use App\Models\User;
+use App\UserRole;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -25,6 +26,7 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'active' => true,
+            'role' => UserRole::ATTENDANT->value,
             'remember_token' => Str::random(10),
         ];
     }

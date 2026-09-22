@@ -1,9 +1,49 @@
 @import 'tailwindcss';
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../vendor/livewire/livewire/src/Features/SupportPagination/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans: 'Fira Sans', ui-sans-serif, system-ui, sans-serif;
+
+    --color-primary: #1e3a5f;
+    --color-primary-dark: #12263f;
+    --color-primary-light: #2b4a73;
+    --color-accent: #2563eb;
+    --color-success: #15803d;
+    --color-danger: #dc2626;
+    --color-warning: #d97706;
+    --color-background: #f4f7fb;
+    --color-surface: #ffffff;
+    --color-border: #d7e0ea;
+    --color-text: #10233a;
+    --color-text-muted: #5b6b7c;
+}
+
+@layer base {
+    [x-cloak] {
+        display: none !important;
+    }
+
+    html {
+        color: var(--color-text);
+        background-color: var(--color-background);
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
 }

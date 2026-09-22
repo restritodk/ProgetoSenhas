@@ -12,7 +12,9 @@ class EnsureOperationalContext
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
-        $unit = $user ? app(OperationalContext::class)->activeUnit($user, $request->session()) : null;
+        $context = app(OperationalContext::class);
+        $unit = $user ? $context->activeUnit($user, $request->session()) : null;
+        $desk = $user ? $context->activeDesk($user, $request->session()) : null;
 
         if (! $user?->active || ! $user->clinic?->active) {
             auth()->logout();
@@ -23,6 +25,7 @@ class EnsureOperationalContext
         }
 
         $request->attributes->set('active_unit', $unit);
+        $request->attributes->set('active_desk', $desk);
 
         return $next($request);
     }

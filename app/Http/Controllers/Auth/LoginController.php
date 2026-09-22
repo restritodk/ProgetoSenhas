@@ -33,7 +33,12 @@ class LoginController extends Controller
         }
         $request->session()->regenerate();
 
-        return redirect()->intended(route('dashboard'));
+        $user = Auth::user();
+        $destination = $user?->canAccessAttendantPanel() && ! $user->isAdministrator()
+            ? route('attendant.panel')
+            : route('dashboard');
+
+        return redirect()->intended($destination);
     }
 
     public function destroy(Request $request): RedirectResponse

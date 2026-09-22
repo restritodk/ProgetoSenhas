@@ -32,5 +32,12 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="APP_TIMEZONE" value="America/Sao_Paulo"/>
+        <env name="BOOTSTRAP_ADMIN_EMAIL" value="admin@example.test"/>
+        <env name="BOOTSTRAP_ADMIN_PASSWORD" value="secret-password"/>
+        <env name="BOOTSTRAP_CLINIC_NAME" value="Clínica principal"/>
+        <env name="BOOTSTRAP_CLINIC_SLUG" value="clinica-principal"/>
+        <env name="BOOTSTRAP_UNIT_NAME" value="Unidade principal"/>
+        <env name="BOOTSTRAP_UNIT_SLUG" value="unidade-principal"/>
     </php>
 </phpunit>
