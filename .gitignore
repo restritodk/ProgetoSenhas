@@ -25,3 +25,12 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# .NET / Humana Print Agent — build outputs (never commit)
+**/bin/
+**/obj/
+**/artifacts/
+**/TestResults/
+*.user
+*.suo
+.vs/
