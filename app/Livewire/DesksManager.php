@@ -11,6 +11,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -137,12 +138,20 @@ class DesksManager extends Component
         $desk = $this->deskForCurrentClinic($this->deskPendingDeactivationId);
         $this->authorize('update', $desk);
 
-        $updateDesk->handle($actor, $desk, [
-            'name' => $desk->name,
-            'code' => $desk->code,
-            'unit_id' => $desk->unit_id,
-            'active' => false,
-        ]);
+        try {
+            $updateDesk->handle($actor, $desk, [
+                'name' => $desk->name,
+                'code' => $desk->code,
+                'unit_id' => $desk->unit_id,
+                'active' => false,
+            ]);
+        } catch (ValidationException $exception) {
+            $this->deskPendingDeactivationId = null;
+            $this->statusMessage = '';
+            $this->addError('active', collect($exception->errors())->flatten()->first() ?? 'Não foi possível desativar a mesa.');
+
+            return;
+        }
 
         $this->deskPendingDeactivationId = null;
         $this->statusMessage = 'Mesa/guichê desativado.';

@@ -1,4 +1,4 @@
-<div wire:poll.10s="refreshPanel">
+<div @if (! $showTransferModal) wire:poll.10s="refreshPanel" @endif>
     @if ($statusMessage !== '')
         <x-ui.alert type="success" class="mb-4">{{ $statusMessage }}</x-ui.alert>
     @endif
@@ -65,7 +65,8 @@
         @php
             $deskState = $this->deskState();
             $current = $this->currentTicket;
-            $totalWaiting = $this->queueCountsByType->sum();
+            $unitWaiting = $this->unitWaitingCount;
+            $deskAvailable = $this->deskAvailableCount;
         @endphp
 
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -80,7 +81,10 @@
                 <span class="text-sm text-text-muted">{{ $this->activeDesk->name }} · {{ $this->activeUnit->name }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-                <p class="text-sm text-text-muted">Fila aguardando: <strong class="text-text">{{ $totalWaiting }}</strong></p>
+                <p class="text-sm text-text-muted">
+                    Fila da unidade: <strong class="text-text">{{ $unitWaiting }}</strong>
+                    · Disponíveis: <strong class="text-text">{{ $deskAvailable }}</strong>
+                </p>
                 <button
                     type="button"
                     wire:click="clearDesk"
@@ -93,10 +97,13 @@
         </div>
 
         <div class="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <x-ui.card title="Total">
-                <p class="text-3xl font-bold text-primary">{{ $totalWaiting }}</p>
+            <x-ui.card title="Fila da unidade">
+                <p class="text-3xl font-bold text-primary">{{ $unitWaiting }}</p>
             </x-ui.card>
-            @foreach ($this->queueTicketTypes->take(3) as $type)
+            <x-ui.card title="Disponíveis para esta mesa">
+                <p class="text-3xl font-bold text-primary">{{ $deskAvailable }}</p>
+            </x-ui.card>
+            @foreach ($this->queueTicketTypes->take(2) as $type)
                 <x-ui.card title="{{ $type->name }} ({{ $type->prefix }})">
                     <p class="text-3xl font-bold text-primary">{{ $this->queueCountsByType[$type->id] ?? 0 }}</p>
                 </x-ui.card>
@@ -149,11 +156,12 @@
                     </button>
                     <button
                         type="button"
-                        disabled
-                        class="inline-flex min-h-14 cursor-not-allowed items-center justify-center rounded-2xl border border-dashed border-border bg-background px-5 text-base font-semibold text-text-muted opacity-70"
-                        title="Disponível em fase futura"
+                        wire:click="openTransferModal"
+                        wire:loading.attr="disabled"
+                        @disabled($current === null || ! in_array($current->status, [\App\TicketStatus::CALLED, \App\TicketStatus::IN_SERVICE], true))
+                        class="inline-flex min-h-14 cursor-pointer items-center justify-center rounded-2xl border border-border bg-surface px-5 text-base font-semibold text-text transition duration-200 hover:bg-background disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        Transferir — em breve
+                        Transferir
                     </button>
                     <button
                         type="button"
@@ -187,23 +195,27 @@
 
             <section class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
                 <h2 class="text-base font-semibold text-text">Próximas da fila</h2>
-                <p class="mt-1 text-xs text-text-muted">Ordenação por prioridade efetiva. Apenas visualização.</p>
+                <p class="mt-1 text-xs text-text-muted">Senhas disponíveis para esta mesa. Ordenação por prioridade efetiva.</p>
 
                 @if ($this->upcomingQueue->isEmpty())
                     <div class="mt-6">
-                        <x-ui.empty-state title="Fila vazia" description="Não há senhas aguardando." />
+                        <x-ui.empty-state title="Fila vazia" description="Não há senhas disponíveis para esta mesa." />
                     </div>
                 @else
                     <ul class="mt-4 space-y-3">
                         @foreach ($this->upcomingQueue as $ticket)
                             @php
-                                $waitingSeconds = max(0, $ticket->issued_at->diffInSeconds($now));
+                                $queuedAt = $ticket->queued_at ?? $ticket->issued_at;
+                                $waitingSeconds = max(0, $queuedAt->diffInSeconds($now));
                             @endphp
                             <li class="rounded-xl border border-border bg-background px-4 py-3">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
                                         <p class="text-lg font-bold text-primary">{{ $ticket->display_code }}</p>
                                         <p class="text-xs text-text-muted">{{ $ticket->ticketType?->name }}</p>
+                                        @if ($ticket->target_desk_id)
+                                            <p class="mt-1 text-xs font-medium text-accent">Direcionada a esta mesa</p>
+                                        @endif
                                     </div>
                                     <div class="text-right">
                                         <p class="text-xs font-semibold text-text">{{ $selector->effectivePriority($ticket, $now) }}</p>
@@ -219,8 +231,8 @@
 
         <section class="mt-6 rounded-2xl border border-border bg-surface p-5 shadow-sm">
             <h2 class="text-base font-semibold text-text">Histórico recente</h2>
-            @if ($this->recentCalls->isEmpty())
-                <p class="mt-3 text-sm text-text-muted">Nenhuma chamada registrada nesta unidade ainda.</p>
+            @if ($this->recentHistory->isEmpty())
+                <p class="mt-3 text-sm text-text-muted">Nenhuma chamada ou transferência registrada nesta unidade ainda.</p>
             @else
                 <div class="mt-4 overflow-x-auto">
                     <table class="min-w-full text-left text-sm">
@@ -235,15 +247,15 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach ($this->recentCalls as $call)
-                                <tr wire:key="call-{{ $call->id }}" class="border-b border-border/70">
-                                    <td class="px-3 py-3 font-semibold text-primary">{{ $call->ticket?->display_code }}</td>
-                                    <td class="px-3 py-3 text-text-muted">{{ $call->ticket?->ticketType?->name }}</td>
-                                    <td class="px-3 py-3 text-text-muted">{{ $call->desk?->name }}</td>
-                                    <td class="px-3 py-3 text-text-muted">{{ $call->call_type->label() }}</td>
-                                    <td class="px-3 py-3 text-text-muted">{{ $call->called_at?->timezone(config('app.timezone'))->format('H:i:s') }}</td>
+                            @foreach ($this->recentHistory as $index => $row)
+                                <tr wire:key="history-{{ $row['kind'] }}-{{ $index }}-{{ $row['at']->timestamp }}" class="border-b border-border/70">
+                                    <td class="px-3 py-3 font-semibold text-primary">{{ $row['ticket_code'] }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $row['type_name'] }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $row['desk_label'] }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $row['event_label'] }}</td>
+                                    <td class="px-3 py-3 text-text-muted">{{ $row['at']->format('H:i:s') }}</td>
                                     <td class="px-3 py-3">
-                                        <x-ui.badge>{{ $call->ticket?->status?->label() }}</x-ui.badge>
+                                        <x-ui.badge>{{ $row['status_label'] }}</x-ui.badge>
                                     </td>
                                 </tr>
                             @endforeach
@@ -253,4 +265,65 @@
             @endif
         </section>
     @endif
+
+    <x-ui.modal title="Transferir senha" :open="$showTransferModal" id="transfer-modal-title">
+        @if ($this->currentTicket)
+            <p class="mb-4 text-sm text-text">
+                Senha:
+                <strong class="text-primary">{{ $this->currentTicket->display_code }}</strong>
+            </p>
+        @endif
+
+        <fieldset class="space-y-3">
+            <legend class="sr-only">Destino da transferência</legend>
+            <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                <input type="radio" wire:model.live="transferDestination" value="queue" class="mt-1 size-4 border-border text-accent">
+                <span>
+                    <span class="block text-sm font-semibold text-text">Voltar para fila geral</span>
+                    <span class="block text-xs text-text-muted">Qualquer mesa ativa poderá chamar esta senha.</span>
+                </span>
+            </label>
+            <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                <input type="radio" wire:model.live="transferDestination" value="desk" class="mt-1 size-4 border-border text-accent">
+                <span>
+                    <span class="block text-sm font-semibold text-text">Mesa específica</span>
+                    <span class="block text-xs text-text-muted">Somente a mesa escolhida poderá receber esta senha.</span>
+                </span>
+            </label>
+        </fieldset>
+
+        @if ($transferDestination === 'desk')
+            <div class="mt-4">
+                <x-ui.select label="Mesa" name="transfer_to_desk_id" id="transfer_to_desk_id" wire:model="transferToDeskId" required>
+                    <option value="">Selecione</option>
+                    @foreach ($this->transferDestinationDesks as $desk)
+                        <option value="{{ $desk->id }}">{{ $desk->name }} ({{ $desk->code }})</option>
+                    @endforeach
+                </x-ui.select>
+                <x-input-error :messages="$errors->get('transferToDeskId')" />
+            </div>
+        @endif
+
+        <div class="mt-4">
+            <x-ui.input
+                label="Motivo (opcional)"
+                name="transfer_reason"
+                id="transfer_reason"
+                wire:model="transferReason"
+                maxlength="255"
+                placeholder="Ex.: Encaminhado para triagem"
+            />
+            <x-input-error :messages="$errors->get('transferReason')" />
+        </div>
+
+        <x-slot:actions>
+            <x-ui.button variant="secondary" wire:click="closeTransferModal" wire:loading.attr="disabled" wire:target="transfer">
+                Cancelar
+            </x-ui.button>
+            <x-ui.button wire:click="transfer" wire:loading.attr="disabled" wire:target="transfer">
+                <span wire:loading.remove wire:target="transfer">Transferir</span>
+                <span wire:loading wire:target="transfer">Transferindo...</span>
+            </x-ui.button>
+        </x-slot:actions>
+    </x-ui.modal>
 </div>

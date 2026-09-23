@@ -28,7 +28,7 @@
             :class="{ 'translate-x-0': sidebarOpen }"
             @keydown.escape.window="sidebarOpen = false"
         >
-            <x-admin.sidebar :sections="$navigationSections" />
+            <x-admin.sidebar :sections="$navigationSections" :branding="$adminBranding ?? []" />
         </aside>
 
         <div class="flex min-h-screen flex-col">

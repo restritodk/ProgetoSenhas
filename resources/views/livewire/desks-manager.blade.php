@@ -2,6 +2,9 @@
     @if ($statusMessage !== '')
         <x-ui.alert type="success" class="mb-4">{{ $statusMessage }}</x-ui.alert>
     @endif
+    @error('active')
+        <x-ui.alert type="danger" class="mb-4">{{ $message }}</x-ui.alert>
+    @enderror
 
     <x-ui.card title="Mesas / Guichês" description="Configure os pontos de atendimento de cada unidade da clínica.">
         <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">

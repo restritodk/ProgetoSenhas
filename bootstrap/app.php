@@ -20,6 +20,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
                 return Limit::perMinute(5)->by($email.'|'.$request->ip());
             });
+
+            RateLimiter::for('kiosk-page', function (Request $request): Limit {
+                return Limit::perMinute(120)->by($request->ip());
+            });
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

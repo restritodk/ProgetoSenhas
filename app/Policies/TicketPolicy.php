@@ -59,6 +59,11 @@ class TicketPolicy
         return $this->canOperateTicket($user, $ticket);
     }
 
+    public function transfer(User $user, Ticket $ticket): bool
+    {
+        return $this->canOperateTicket($user, $ticket);
+    }
+
     private function canManageTickets(User $user): bool
     {
         return $user->active && $user->isAdministrator() && $this->hasActiveClinic($user);

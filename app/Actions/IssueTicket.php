@@ -2,18 +2,24 @@
 
 namespace App\Actions;
 
+use App\Models\Kiosk;
+use App\Models\KioskIssuanceAttempt;
 use App\Models\Ticket;
 use App\Models\TicketSequence;
 use App\Models\TicketType;
 use App\Models\Unit;
+use App\Models\UnitTicketType;
 use App\Models\User;
+use App\TicketSource;
 use App\TicketStatus;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 
 class IssueTicket
 {
@@ -25,12 +31,124 @@ class IssueTicket
         $unit = $this->activeUnitForClinic($actor->clinic_id, $unitId);
         $ticketType = $this->activeTicketTypeForClinic($actor->clinic_id, $ticketTypeId);
 
+        return $this->createTicket(
+            clinicId: $actor->clinic_id,
+            unit: $unit,
+            ticketType: $ticketType,
+            source: TicketSource::ADMIN,
+            kioskId: null,
+            issuedAt: $issuedAt,
+        );
+    }
+
+    /**
+     * Public kiosk issuance. Clinic/Unit are always derived from the Kiosk.
+     * requestToken provides short-window idempotency against double taps/retries.
+     */
+    public function handleFromKiosk(
+        Kiosk $kiosk,
+        int $ticketTypeId,
+        string $requestToken,
+        ?string $clientIp = null,
+        ?CarbonImmutable $issuedAt = null,
+    ): Ticket {
+        $requestToken = trim($requestToken);
+
+        if ($requestToken === '' || strlen($requestToken) < 16 || strlen($requestToken) > 64) {
+            throw ValidationException::withMessages([
+                'requestToken' => 'Tentativa de emissão inválida. Tente novamente.',
+            ]);
+        }
+
+        $this->assertKioskRateLimit($kiosk, $clientIp);
+
+        $kiosk->loadMissing(['clinic', 'unit']);
+
+        if (! $kiosk->isOperationallyAvailable()) {
+            throw ValidationException::withMessages([
+                'kiosk' => 'Totem temporariamente indisponível.',
+            ]);
+        }
+
+        $offer = $this->activeOfferForKiosk($kiosk, $ticketTypeId);
+        $ticketType = $offer->ticketType;
+        $unit = $kiosk->unit;
+
+        return DB::transaction(function () use ($kiosk, $ticketType, $unit, $requestToken, $issuedAt): Ticket {
+            $attempt = KioskIssuanceAttempt::query()
+                ->where('kiosk_id', $kiosk->id)
+                ->where('request_token', $requestToken)
+                ->lockForUpdate()
+                ->first();
+
+            if ($attempt?->ticket_id !== null) {
+                return Ticket::query()
+                    ->whereKey($attempt->ticket_id)
+                    ->with('ticketType')
+                    ->firstOrFail();
+            }
+
+            if ($attempt === null) {
+                try {
+                    $attempt = new KioskIssuanceAttempt;
+                    $attempt->forceFill([
+                        'clinic_id' => $kiosk->clinic_id,
+                        'kiosk_id' => $kiosk->id,
+                        'request_token' => $requestToken,
+                        'ticket_type_id' => $ticketType->id,
+                        'ticket_id' => null,
+                    ])->save();
+                } catch (UniqueConstraintViolationException|QueryException) {
+                    $attempt = KioskIssuanceAttempt::query()
+                        ->where('kiosk_id', $kiosk->id)
+                        ->where('request_token', $requestToken)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+
+                    if ($attempt->ticket_id !== null) {
+                        return Ticket::query()
+                            ->whereKey($attempt->ticket_id)
+                            ->with('ticketType')
+                            ->firstOrFail();
+                    }
+                }
+            }
+
+            if ((int) $attempt->ticket_type_id !== (int) $ticketType->id) {
+                throw ValidationException::withMessages([
+                    'requestToken' => 'Tentativa de emissão inválida. Tente novamente.',
+                ]);
+            }
+
+            $ticket = $this->createTicket(
+                clinicId: $kiosk->clinic_id,
+                unit: $unit,
+                ticketType: $ticketType,
+                source: TicketSource::KIOSK,
+                kioskId: $kiosk->id,
+                issuedAt: $issuedAt,
+            );
+
+            $attempt->forceFill(['ticket_id' => $ticket->id])->save();
+
+            return $ticket;
+        });
+    }
+
+    private function createTicket(
+        int $clinicId,
+        Unit $unit,
+        TicketType $ticketType,
+        TicketSource $source,
+        ?int $kioskId,
+        ?CarbonImmutable $issuedAt = null,
+    ): Ticket {
         $issuedAt ??= CarbonImmutable::now(config('app.timezone'));
         $sequenceDate = $issuedAt->toDateString();
 
-        return DB::transaction(function () use ($actor, $unit, $ticketType, $issuedAt, $sequenceDate): Ticket {
+        return DB::transaction(function () use ($clinicId, $unit, $ticketType, $source, $kioskId, $issuedAt, $sequenceDate): Ticket {
             $sequenceNumber = $this->allocateNextNumber(
-                clinicId: $actor->clinic_id,
+                clinicId: $clinicId,
                 unitId: $unit->id,
                 ticketTypeId: $ticketType->id,
                 sequenceDate: $sequenceDate,
@@ -38,17 +156,57 @@ class IssueTicket
 
             $ticket = new Ticket;
             $ticket->forceFill([
-                'clinic_id' => $actor->clinic_id,
+                'clinic_id' => $clinicId,
                 'unit_id' => $unit->id,
                 'ticket_type_id' => $ticketType->id,
                 'sequence_number' => $sequenceNumber,
                 'sequence_date' => $sequenceDate,
                 'status' => TicketStatus::WAITING,
+                'source' => $source,
+                'kiosk_id' => $kioskId,
                 'issued_at' => $issuedAt,
+                'queued_at' => $issuedAt,
+                'target_desk_id' => null,
             ])->save();
 
             return $ticket->refresh()->load('ticketType');
         });
+    }
+
+    private function assertKioskRateLimit(Kiosk $kiosk, ?string $clientIp): void
+    {
+        $key = 'kiosk-issue:'.$kiosk->id.':'.($clientIp ?: 'unknown');
+
+        if (RateLimiter::tooManyAttempts($key, 60)) {
+            throw new TooManyRequestsHttpException(60, 'Muitas tentativas. Aguarde um momento e tente novamente.');
+        }
+
+        RateLimiter::hit($key, 60);
+    }
+
+    private function activeOfferForKiosk(Kiosk $kiosk, int $ticketTypeId): UnitTicketType
+    {
+        $offer = UnitTicketType::query()
+            ->with(['ticketType'])
+            ->where('clinic_id', $kiosk->clinic_id)
+            ->where('unit_id', $kiosk->unit_id)
+            ->where('ticket_type_id', $ticketTypeId)
+            ->where('active', true)
+            ->first();
+
+        if ($offer === null || $offer->ticketType === null || ! $offer->ticketType->active) {
+            throw ValidationException::withMessages([
+                'ticketTypeId' => 'O tipo de atendimento selecionado não está disponível.',
+            ]);
+        }
+
+        if ((int) $offer->ticketType->clinic_id !== (int) $kiosk->clinic_id) {
+            throw ValidationException::withMessages([
+                'ticketTypeId' => 'O tipo de atendimento selecionado não está disponível.',
+            ]);
+        }
+
+        return $offer;
     }
 
     private function allocateNextNumber(int $clinicId, int $unitId, int $ticketTypeId, string $sequenceDate): int

@@ -6,6 +6,7 @@ use App\Models\Clinic;
 use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\Unit;
+use App\TicketSource;
 use App\TicketStatus;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -23,10 +24,14 @@ class TicketFactory extends Factory
             'sequence_number' => 1,
             'sequence_date' => now(config('app.timezone'))->toDateString(),
             'status' => TicketStatus::WAITING,
+            'source' => TicketSource::ADMIN,
             'issued_at' => now(config('app.timezone')),
+            'queued_at' => now(config('app.timezone')),
             'called_at' => null,
             'service_started_at' => null,
             'completed_at' => null,
+            'target_desk_id' => null,
+            'kiosk_id' => null,
         ];
     }
 

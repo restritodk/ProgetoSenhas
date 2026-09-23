@@ -3,8 +3,10 @@
 namespace App\Actions;
 
 use App\Models\Desk;
+use App\Models\Ticket;
 use App\Models\Unit;
 use App\Models\User;
+use App\TicketStatus;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +23,10 @@ class UpdateDesk
 
         $unit = $this->unitForActorClinic($actor, $attributes['unit_id']);
 
+        if ($desk->active && $attributes['active'] === false) {
+            $this->assertNoWaitingTargetedTickets($desk);
+        }
+
         $desk->forceFill([
             'clinic_id' => $actor->clinic_id,
             'unit_id' => $unit->id,
@@ -30,6 +36,21 @@ class UpdateDesk
         ])->save();
 
         return $desk->refresh();
+    }
+
+    private function assertNoWaitingTargetedTickets(Desk $desk): void
+    {
+        $hasTargeted = Ticket::query()
+            ->where('clinic_id', $desk->clinic_id)
+            ->where('target_desk_id', $desk->id)
+            ->where('status', TicketStatus::WAITING)
+            ->exists();
+
+        if ($hasTargeted) {
+            throw ValidationException::withMessages([
+                'active' => 'Não é possível desativar a mesa enquanto houver senhas aguardando direcionadas a ela.',
+            ]);
+        }
     }
 
     private function unitForActorClinic(User $actor, int $unitId): Unit

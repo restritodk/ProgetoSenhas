@@ -36,7 +36,7 @@ enum TicketStatus: string
         return match ($this) {
             self::WAITING => [self::CALLED, self::CANCELLED],
             self::CALLED => [self::IN_SERVICE, self::NO_SHOW, self::WAITING, self::CANCELLED],
-            self::IN_SERVICE => [self::COMPLETED, self::CANCELLED],
+            self::IN_SERVICE => [self::COMPLETED, self::WAITING, self::CANCELLED],
             self::COMPLETED, self::NO_SHOW, self::CANCELLED => [],
         };
     }

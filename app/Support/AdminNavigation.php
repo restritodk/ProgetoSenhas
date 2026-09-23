@@ -22,7 +22,7 @@ class AdminNavigation
                 'items' => [
                     ['label' => 'Usuários', 'icon' => 'users', 'route' => 'users.index', 'available' => true],
                     ['label' => 'Perfis e Permissões', 'icon' => 'shield', 'route' => null, 'available' => false],
-                    ['label' => 'Configurações', 'icon' => 'cog', 'route' => null, 'available' => false],
+                    ['label' => 'Configurações', 'icon' => 'cog', 'route' => 'settings.index', 'available' => true],
                     ['label' => 'Logs de Auditoria', 'icon' => 'clipboard', 'route' => null, 'available' => false],
                 ],
             ],
@@ -31,8 +31,10 @@ class AdminNavigation
                 'items' => [
                     ['label' => 'Mesas / Guichês', 'icon' => 'desk', 'route' => 'desks.index', 'available' => true],
                     ['label' => 'Tipos de Senha', 'icon' => 'ticket', 'route' => 'ticket-types.index', 'available' => true],
+                    ['label' => 'Tipos por Unidade', 'icon' => 'queue', 'route' => 'unit-ticket-types.index', 'available' => true],
                     ['label' => 'Emitir senha', 'icon' => 'hash', 'route' => 'tickets.issue', 'available' => true],
                     ['label' => 'Atendimento', 'icon' => 'heart', 'route' => 'attendant.panel', 'available' => true],
+                    ['label' => 'Totens', 'icon' => 'monitor', 'route' => 'kiosks.index', 'available' => true],
                     ['label' => 'Filas e Prioridades', 'icon' => 'queue', 'route' => null, 'available' => false],
                     ['label' => 'Senhas', 'icon' => 'hash', 'route' => null, 'available' => false],
                     ['label' => 'Atendimentos', 'icon' => 'heart', 'route' => null, 'available' => false],
@@ -41,8 +43,8 @@ class AdminNavigation
             [
                 'title' => 'Comunicação',
                 'items' => [
-                    ['label' => 'Mídia da TV', 'icon' => 'image', 'route' => null, 'available' => false],
-                    ['label' => 'Painéis / TVs', 'icon' => 'monitor', 'route' => null, 'available' => false],
+                    ['label' => 'Mídia da TV', 'icon' => 'image', 'route' => 'media-items.index', 'available' => true],
+                    ['label' => 'Painéis / TVs', 'icon' => 'monitor', 'route' => 'display-panels.index', 'available' => true],
                     ['label' => 'Relatórios', 'icon' => 'chart', 'route' => null, 'available' => false],
                 ],
             ],

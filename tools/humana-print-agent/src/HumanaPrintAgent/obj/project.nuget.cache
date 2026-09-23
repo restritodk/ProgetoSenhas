@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "daUKoP/jItk=",
+  "success": true,
+  "projectFilePath": "C:\\xampp\\htdocs\\humanaClinica\\tools\\humana-print-agent\\src\\HumanaPrintAgent\\HumanaPrintAgent.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\euric\\AppData\\Local\\Temp\\cursor-sandbox-cache\\91f1b7ae140541f06be3e11862de4d53\\nuget\\microsoft.win32.systemevents\\8.0.0\\microsoft.win32.systemevents.8.0.0.nupkg.sha512",
+    "C:\\Users\\euric\\AppData\\Local\\Temp\\cursor-sandbox-cache\\91f1b7ae140541f06be3e11862de4d53\\nuget\\system.drawing.common\\8.0.11\\system.drawing.common.8.0.11.nupkg.sha512"
+  ],
+  "logs": []
+}

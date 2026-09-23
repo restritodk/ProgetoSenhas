@@ -167,6 +167,8 @@ class TicketPriorityTest extends TestCase
             'sequence_date' => $issuedAt->toDateString(),
             'status' => TicketStatus::WAITING,
             'issued_at' => $issuedAt,
+            'queued_at' => $issuedAt,
+            'target_desk_id' => null,
         ])->save();
 
         return $ticket->refresh()->load('ticketType');

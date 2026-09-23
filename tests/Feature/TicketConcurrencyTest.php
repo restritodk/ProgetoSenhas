@@ -53,6 +53,7 @@ class TicketConcurrencyTest extends TestCase
             'sequence_date' => $ticket->sequence_date,
             'status' => $ticket->status,
             'issued_at' => now(config('app.timezone')),
+            'queued_at' => now(config('app.timezone')),
         ])->save();
     }
 

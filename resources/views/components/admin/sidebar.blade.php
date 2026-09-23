@@ -1,14 +1,45 @@
 @props([
     'sections' => [],
+    'branding' => [],
 ])
 
+@php
+    $logoUrl = $branding['logo_url'] ?? null;
+    $logoBackground = \App\Support\LogoSurface::normalizeMode($branding['logo_background'] ?? \App\Support\LogoSurface::NONE);
+    $logoBackgroundColor = \App\Support\LogoSurface::normalizeColor($branding['logo_background_color'] ?? \App\Support\LogoSurface::DEFAULT_CUSTOM_COLOR);
+    $logoSurfaceCss = \App\Support\LogoSurface::cssBackground($logoBackground, $logoBackgroundColor);
+@endphp
+
 <div class="flex h-full flex-col">
-    <div class="flex items-center gap-3 border-b border-white/10 px-5 py-5">
-        <span class="flex size-10 items-center justify-center rounded-xl bg-accent text-sm font-bold" aria-hidden="true">hC</span>
-        <div>
-            <p class="text-base font-semibold tracking-tight">humanaClinica</p>
-            <p class="text-xs text-white/70">Painel administrativo</p>
-        </div>
+    <div class="border-b border-white/10 px-5 py-5">
+        @if ($logoUrl)
+            <div class="space-y-2">
+                <div
+                    @class([
+                        'inline-flex max-w-full items-center leading-none',
+                        'rounded-lg px-2.5 py-1.5' => $logoSurfaceCss !== null,
+                    ])
+                    @if ($logoSurfaceCss !== null)
+                        style="background: {{ $logoSurfaceCss }};"
+                    @endif
+                >
+                    <img
+                        src="{{ $logoUrl }}"
+                        alt=""
+                        class="max-h-10 max-w-[12rem] bg-transparent object-contain"
+                    >
+                </div>
+                <p class="text-xs text-white/70">Painel administrativo</p>
+            </div>
+        @else
+            <div class="flex items-center gap-3">
+                <span class="flex size-10 items-center justify-center rounded-xl bg-accent text-sm font-bold" aria-hidden="true">hC</span>
+                <div>
+                    <p class="text-base font-semibold tracking-tight">humanaClinica</p>
+                    <p class="text-xs text-white/70">Painel administrativo</p>
+                </div>
+            </div>
+        @endif
     </div>
 
     <nav class="flex-1 overflow-y-auto px-3 py-4" aria-label="Menu principal">

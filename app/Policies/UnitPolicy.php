@@ -41,6 +41,11 @@ class UnitPolicy
         return $this->belongsToActiveClinic($user, $unit) && $user->isAdministrator();
     }
 
+    public function manageTicketTypes(User $user, Unit $unit): bool
+    {
+        return $this->update($user, $unit);
+    }
+
     public function delete(User $user, Unit $unit): bool
     {
         return $this->update($user, $unit);

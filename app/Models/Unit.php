@@ -38,4 +38,22 @@ class Unit extends Model
     {
         return $this->hasMany(Ticket::class);
     }
+
+    public function kiosks(): HasMany
+    {
+        return $this->hasMany(Kiosk::class);
+    }
+
+    public function unitTicketTypes(): HasMany
+    {
+        return $this->hasMany(UnitTicketType::class);
+    }
+
+    public function ticketTypes(): BelongsToMany
+    {
+        return $this->belongsToMany(TicketType::class, 'unit_ticket_types')
+            ->withPivot(['id', 'clinic_id', 'active', 'display_name', 'position'])
+            ->withTimestamps()
+            ->orderByPivot('position');
+    }
 }

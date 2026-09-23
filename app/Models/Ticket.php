@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\TicketSource;
 use App\TicketStatus;
 use Database\Factories\TicketFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -23,7 +24,9 @@ class Ticket extends Model
             'sequence_number' => 'integer',
             'sequence_date' => 'date',
             'status' => TicketStatus::class,
+            'source' => TicketSource::class,
             'issued_at' => 'datetime',
+            'queued_at' => 'datetime',
             'called_at' => 'datetime',
             'service_started_at' => 'datetime',
             'completed_at' => 'datetime',
@@ -50,14 +53,29 @@ class Ticket extends Model
         return $this->belongsTo(Desk::class, 'current_desk_id');
     }
 
+    public function targetDesk(): BelongsTo
+    {
+        return $this->belongsTo(Desk::class, 'target_desk_id');
+    }
+
     public function calledBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'called_by_user_id');
     }
 
+    public function kiosk(): BelongsTo
+    {
+        return $this->belongsTo(Kiosk::class);
+    }
+
     public function calls(): HasMany
     {
         return $this->hasMany(TicketCall::class);
+    }
+
+    public function transfers(): HasMany
+    {
+        return $this->hasMany(TicketTransfer::class);
     }
 
     /**

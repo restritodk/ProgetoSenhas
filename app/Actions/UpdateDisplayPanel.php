@@ -1,0 +1,50 @@
+<?php
+
+namespace App\Actions;
+
+use App\Models\DisplayPanel;
+use App\Models\Unit;
+use App\Models\User;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class UpdateDisplayPanel
+{
+    /**
+     * @param  array{name: string, code: string, unit_id: int, active: bool}  $attributes
+     */
+    public function handle(User $actor, DisplayPanel $panel, array $attributes): DisplayPanel
+    {
+        abort_if($panel->clinic_id !== $actor->clinic_id, 404);
+        Gate::forUser($actor)->authorize('update', $panel);
+
+        $unit = $this->unitForActorClinic($actor, $attributes['unit_id']);
+
+        $panel->forceFill([
+            'clinic_id' => $actor->clinic_id,
+            'unit_id' => $unit->id,
+            'name' => $attributes['name'],
+            'code' => Str::upper($attributes['code']),
+            'active' => $attributes['active'],
+        ])->save();
+
+        return $panel->refresh();
+    }
+
+    private function unitForActorClinic(User $actor, int $unitId): Unit
+    {
+        $unit = Unit::query()
+            ->where('clinic_id', $actor->clinic_id)
+            ->whereKey($unitId)
+            ->first();
+
+        if ($unit === null) {
+            throw ValidationException::withMessages([
+                'unitId' => 'A unidade selecionada não pertence à sua clínica.',
+            ]);
+        }
+
+        return $unit;
+    }
+}

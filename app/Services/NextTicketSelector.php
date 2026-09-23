@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Desk;
 use App\Models\Ticket;
 use App\Models\Unit;
 use App\TicketStatus;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class NextTicketSelector
@@ -20,10 +22,11 @@ class NextTicketSelector
 
     /**
      * Side-effect free: identifies the next WAITING ticket for the unit without calling it.
+     * When $desk is provided, only general-queue and desk-targeted tickets are candidates.
      */
-    public function select(Unit $unit, ?CarbonImmutable $at = null): ?Ticket
+    public function select(Unit $unit, ?CarbonImmutable $at = null, ?Desk $desk = null): ?Ticket
     {
-        return $this->rankedWaitingQueue($unit, $at)->first();
+        return $this->rankedWaitingQueue($unit, $at, $desk)->first();
     }
 
     /**
@@ -31,14 +34,11 @@ class NextTicketSelector
      *
      * @return Collection<int, Ticket>
      */
-    public function rankedWaitingQueue(Unit $unit, ?CarbonImmutable $at = null): Collection
+    public function rankedWaitingQueue(Unit $unit, ?CarbonImmutable $at = null, ?Desk $desk = null): Collection
     {
-        $tickets = Ticket::query()
+        $tickets = $this->waitingQuery($unit, $desk)
             ->with(['ticketType:id,clinic_id,name,prefix,priority,active'])
-            ->where('clinic_id', $unit->clinic_id)
-            ->where('unit_id', $unit->id)
-            ->where('status', TicketStatus::WAITING)
-            ->orderBy('issued_at')
+            ->orderBy('queued_at')
             ->orderBy('id')
             ->get();
 
@@ -65,10 +65,10 @@ class NextTicketSelector
                     return $priorityComparison;
                 }
 
-                $issuedComparison = $left->issued_at <=> $right->issued_at;
+                $queuedComparison = $left->queued_at <=> $right->queued_at;
 
-                if ($issuedComparison !== 0) {
-                    return $issuedComparison;
+                if ($queuedComparison !== 0) {
+                    return $queuedComparison;
                 }
 
                 return $left->id <=> $right->id;
@@ -80,9 +80,30 @@ class NextTicketSelector
     {
         $at ??= CarbonImmutable::now(config('app.timezone'));
         $basePriority = (int) ($ticket->ticketType?->priority ?? 0);
-        $waitingSeconds = max(0, $ticket->issued_at->diffInSeconds($at));
+        $queuedAt = $ticket->queued_at ?? $ticket->issued_at;
+        $waitingSeconds = max(0, $queuedAt->diffInSeconds($at));
         $intervals = intdiv($waitingSeconds, self::AGING_INTERVAL_SECONDS);
 
         return $basePriority + ($intervals * self::AGING_BONUS_PER_INTERVAL);
+    }
+
+    /**
+     * @return Builder<Ticket>
+     */
+    private function waitingQuery(Unit $unit, ?Desk $desk = null): Builder
+    {
+        $query = Ticket::query()
+            ->where('clinic_id', $unit->clinic_id)
+            ->where('unit_id', $unit->id)
+            ->where('status', TicketStatus::WAITING);
+
+        if ($desk !== null) {
+            $query->where(function (Builder $builder) use ($desk): void {
+                $builder->whereNull('target_desk_id')
+                    ->orWhere('target_desk_id', $desk->id);
+            });
+        }
+
+        return $query;
     }
 }

@@ -57,6 +57,10 @@ class CallNextTicket
                 ->where('clinic_id', $unit->clinic_id)
                 ->where('unit_id', $unit->id)
                 ->where('status', TicketStatus::WAITING)
+                ->where(function ($query) use ($desk): void {
+                    $query->whereNull('target_desk_id')
+                        ->orWhere('target_desk_id', $desk->id);
+                })
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
@@ -81,6 +85,7 @@ class CallNextTicket
             $ticket->forceFill([
                 'status' => TicketStatus::CALLED,
                 'current_desk_id' => $desk->id,
+                'target_desk_id' => null,
                 'called_by_user_id' => $actor->id,
                 'called_at' => $calledAt,
             ])->save();
