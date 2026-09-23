@@ -43,7 +43,12 @@ class DeskManagementTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('desks.index'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('desks.index'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
 
         Livewire::actingAs($user)
             ->test(DesksManager::class)

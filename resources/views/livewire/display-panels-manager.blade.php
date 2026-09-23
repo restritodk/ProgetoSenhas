@@ -3,14 +3,20 @@
         <x-ui.alert type="success" class="mb-4">{{ $statusMessage }}</x-ui.alert>
     @endif
 
-    <x-ui.card title="Painéis / TVs" description="Configure os painéis públicos de chamada por unidade. A mídia/playlist virá em fase futura.">
+    <x-ui.card title="Painéis / TVs" description="Configure os painéis públicos de chamada por unidade e setor. Cada painel atende um setor.">
         <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div class="grid flex-1 gap-3 md:grid-cols-3">
+            <div class="grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <x-ui.input label="Buscar" name="panel_search" id="panel_search" wire:model.live.debounce.400ms="search" placeholder="Nome ou código" />
                 <x-ui.select label="Unidade" name="panel_unit_filter" id="panel_unit_filter" wire:model.live="unitFilter">
                     <option value="">Todas as unidades</option>
                     @foreach ($this->availableUnits as $unit)
                         <option value="{{ $unit->id }}">{{ $unit->name }}</option>
+                    @endforeach
+                </x-ui.select>
+                <x-ui.select label="Setor" name="panel_sector_filter" id="panel_sector_filter" wire:model.live="sectorFilter" :disabled="$unitFilter === ''">
+                    <option value="">{{ $unitFilter === '' ? 'Selecione a unidade' : 'Todos os setores' }}</option>
+                    @foreach ($this->filterSectors as $sector)
+                        <option value="{{ $sector->id }}">{{ $sector->name }}</option>
                     @endforeach
                 </x-ui.select>
                 <x-ui.select label="Status" name="panel_status_filter" id="panel_status_filter" wire:model.live="statusFilter">
@@ -35,7 +41,7 @@
                     <x-input-error :messages="$errors->get('code')" />
                 </x-ui.input>
                 <div>
-                    <x-ui.select label="Unidade" name="panel_unit_id" id="panel_unit_id" wire:model="unitId" required>
+                    <x-ui.select label="Unidade" name="panel_unit_id" id="panel_unit_id" wire:model.live="unitId" required>
                         <option value="">Selecione</option>
                         @foreach ($this->availableUnits as $unit)
                             <option value="{{ $unit->id }}">{{ $unit->name }}@unless ($unit->active) (desativada)@endunless</option>
@@ -43,7 +49,16 @@
                     </x-ui.select>
                     <x-input-error :messages="$errors->get('unitId')" />
                 </div>
-                <div class="flex items-end">
+                <div>
+                    <x-ui.select label="Setor" name="panel_sector_id" id="panel_sector_id" wire:model="sectorId" required :disabled="$unitId === null">
+                        <option value="">{{ $unitId === null ? 'Selecione a unidade primeiro' : 'Selecione' }}</option>
+                        @foreach ($this->availableSectors as $sector)
+                            <option value="{{ $sector->id }}">{{ $sector->name }}@unless ($sector->active) (inativo)@endunless</option>
+                        @endforeach
+                    </x-ui.select>
+                    <x-input-error :messages="$errors->get('sectorId')" />
+                </div>
+                <div class="flex items-end md:col-span-2">
                     <label class="flex min-h-11 items-center gap-3 text-sm text-text">
                         <input type="checkbox" wire:model="active" class="size-4 rounded border-border text-accent">
                         Ativo
@@ -59,12 +74,16 @@
             </form>
         @endif
 
+        @php
+            $hasFilters = $search !== '' || $unitFilter !== '' || $sectorFilter !== '' || $statusFilter !== '';
+        @endphp
+
         @if ($panels->isEmpty() && ! $showForm)
             <x-ui.empty-state
-                title="{{ $search !== '' || $unitFilter !== '' || $statusFilter !== '' ? 'Nenhum painel encontrado.' : 'Nenhum painel cadastrado.' }}"
-                description="{{ $search !== '' || $unitFilter !== '' || $statusFilter !== '' ? 'Ajuste a busca ou os filtros.' : 'Cadastre o primeiro painel de TV da clínica.' }}"
+                title="{{ $hasFilters ? 'Nenhum painel encontrado.' : 'Nenhum painel cadastrado.' }}"
+                description="{{ $hasFilters ? 'Ajuste a busca ou os filtros.' : 'Cadastre o primeiro painel de TV da clínica.' }}"
             >
-                @if ($search === '' && $unitFilter === '' && $statusFilter === '')
+                @if (! $hasFilters)
                     <x-ui.button wire:click="startCreate">Novo painel</x-ui.button>
                 @endif
             </x-ui.empty-state>
@@ -77,6 +96,7 @@
                             <th scope="col" class="px-3 py-3 font-semibold">Nome</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Código</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Unidade</th>
+                            <th scope="col" class="px-3 py-3 font-semibold">Setor</th>
                             <th scope="col" class="px-3 py-3 font-semibold">URL pública</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Status</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Ações</th>
@@ -84,10 +104,14 @@
                     </thead>
                     <tbody>
                         @foreach ($panels as $panel)
+                            @php
+                                $primarySector = $panel->sectors->first();
+                            @endphp
                             <tr wire:key="panel-{{ $panel->id }}" class="border-b border-border/70">
                                 <td class="px-3 py-3 font-medium text-text">{{ $panel->name }}</td>
                                 <td class="px-3 py-3 text-text-muted">{{ $panel->code }}</td>
                                 <td class="px-3 py-3 text-text-muted">{{ $panel->unit?->name ?? '—' }}</td>
+                                <td class="px-3 py-3 text-text-muted">{{ $primarySector?->name ?? '—' }}</td>
                                 <td class="px-3 py-3">
                                     <div class="flex max-w-xs flex-col gap-2">
                                         <code class="truncate text-xs text-text-muted" title="{{ $panel->publicUrl() }}">{{ $panel->publicUrl() }}</code>

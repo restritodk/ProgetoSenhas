@@ -62,7 +62,8 @@
                 <fieldset class="md:col-span-2">
                     <legend class="mb-2 text-sm font-medium text-text">Unidades autorizadas</legend>
                     <p class="mb-3 text-xs text-text-muted">
-                        O vínculo operacional é opcional e independente da autorização administrativa. Administradores não recebem unidades automaticamente.
+                        Locais/filiais físicos onde este usuário pode trabalhar (ex.: Unidade principal, Hospital Toledo).
+                        Não use setores de atendimento (como “Recepção”) como unidade — setores se organizam pelo nome das mesas/guichês.
                     </p>
                     @if ($this->availableUnits->isEmpty())
                         <p class="text-sm text-text-muted">Nenhuma unidade cadastrada nesta clínica.</p>

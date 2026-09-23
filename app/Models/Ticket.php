@@ -43,6 +43,11 @@ class Ticket extends Model
         return $this->belongsTo(Unit::class);
     }
 
+    public function sector(): BelongsTo
+    {
+        return $this->belongsTo(Sector::class);
+    }
+
     public function ticketType(): BelongsTo
     {
         return $this->belongsTo(TicketType::class);
@@ -61,6 +66,21 @@ class Ticket extends Model
     public function calledBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'called_by_user_id');
+    }
+
+    public function startedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'started_by_user_id');
+    }
+
+    public function completedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'completed_by_user_id');
+    }
+
+    public function noShowBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'no_show_by_user_id');
     }
 
     public function kiosk(): BelongsTo

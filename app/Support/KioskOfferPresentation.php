@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\SectorTicketType;
 use App\Models\UnitTicketType;
 
 /**
@@ -20,7 +21,7 @@ final class KioskOfferPresentation
 
     public const VARIANT_RETURN = 'return';
 
-    public static function variant(UnitTicketType $offer): string
+    public static function variant(UnitTicketType|SectorTicketType $offer): string
     {
         $haystack = mb_strtolower(trim(implode(' ', array_filter([
             $offer->publicLabel(),
@@ -47,18 +48,18 @@ final class KioskOfferPresentation
         return self::VARIANT_STANDARD;
     }
 
-    public static function description(UnitTicketType $offer): string
+    public static function description(UnitTicketType|SectorTicketType $offer): string
     {
         return match (self::variant($offer)) {
             self::VARIANT_PRIORITY => 'Idosos, gestantes, pessoas com deficiência e demais prioridades',
             self::VARIANT_URGENT => 'Casos urgentes que precisam de atendimento imediato',
             self::VARIANT_EXAM => 'Exames, coletas e procedimentos agendados',
             self::VARIANT_RETURN => 'Retornos e acompanhamentos já iniciados',
-            default => 'Consultas, retornos e atendimentos gerais',
+            default => 'Toque para retirar sua senha de atendimento',
         };
     }
 
-    public static function icon(UnitTicketType $offer): string
+    public static function icon(UnitTicketType|SectorTicketType $offer): string
     {
         return match (self::variant($offer)) {
             self::VARIANT_PRIORITY => 'priority',
@@ -69,7 +70,7 @@ final class KioskOfferPresentation
         };
     }
 
-    public static function isEmphasized(UnitTicketType $offer): bool
+    public static function isEmphasized(UnitTicketType|SectorTicketType $offer): bool
     {
         $variant = self::variant($offer);
 

@@ -23,10 +23,14 @@
     $onPrimary = $p['on_primary_color'] ?? '#ffffff';
     $offers = $this->offeredTypes;
     $offerCount = $offers->count();
+    $offersFingerprint = $offers->map(
+        fn ($offer) => $offer->id.'-'.$offer->ticket_type_id.'-'.(int) $offer->active.'-'.(int) ($offer->ticketType?->active ?? 0).'-'.$offer->position.'-'.$offer->publicLabel()
+    )->implode('|');
     $gridClass = match (true) {
         $offerCount <= 1 => 'kiosk-cards kiosk-cards--one',
         $offerCount === 2 => 'kiosk-cards kiosk-cards--two',
         $offerCount === 3 => 'kiosk-cards kiosk-cards--three',
+        $offerCount === 4 => 'kiosk-cards kiosk-cards--four',
         default => 'kiosk-cards kiosk-cards--many',
     };
     $decorativeLines = $slogan !== ''
@@ -38,7 +42,7 @@
 <div
     class="kiosk-shell"
     style="--color-primary: {{ $primaryColor }}; --color-accent: {{ $accentColor }}; --color-primary-dark: {{ $primaryColor }}; --color-on-primary: {{ $onPrimary }}; --kiosk-priority: #e8a317;"
-    @if ($screen !== 'result') wire:poll.30s="refreshAvailability" @endif
+    @if ($screen !== 'result' && ! $issuing) wire:poll.3s="refreshAvailability" @endif
 >
     <div class="kiosk-main">
         <header class="kiosk-header">
@@ -190,14 +194,14 @@
                 <p class="kiosk-hero__subtitle">{{ $subtitle }}</p>
             </section>
 
-            <section class="kiosk-offers" aria-label="Tipos de atendimento">
+            <section class="kiosk-offers" aria-label="Tipos de atendimento" wire:key="kiosk-offers-{{ md5($offersFingerprint) }}">
                 @if ($offers->isEmpty())
                     <div class="kiosk-state-card">
                         <p class="kiosk-state-title">Nenhum atendimento disponível</p>
                         <p class="kiosk-state-text">Procure a recepção para mais informações.</p>
                     </div>
                 @else
-                    <div class="{{ $gridClass }}">
+                    <div class="{{ $gridClass }}" wire:key="kiosk-grid-{{ $offerCount }}-{{ md5($offersFingerprint) }}">
                         @foreach ($offers as $offer)
                             @php
                                 $variant = KioskOfferPresentation::variant($offer);

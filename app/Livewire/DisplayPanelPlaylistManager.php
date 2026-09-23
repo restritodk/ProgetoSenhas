@@ -114,7 +114,10 @@ class DisplayPanelPlaylistManager extends Component
     public function panel(): DisplayPanel
     {
         return DisplayPanel::query()
-            ->with('unit:id,name')
+            ->with([
+                'unit:id,name',
+                'sectors:id,name,unit_id',
+            ])
             ->where('clinic_id', auth()->user()?->clinic_id)
             ->whereKey($this->panelId)
             ->firstOrFail();

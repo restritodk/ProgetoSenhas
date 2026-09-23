@@ -22,7 +22,7 @@ class UnitTicketTypesManager extends Component
 
     public function mount(): void
     {
-        $this->authorize('manageAny', Unit::class);
+        $this->authorize('unit_ticket_types.manage');
 
         $units = $this->availableUnits;
         if ($units->count() === 1) {

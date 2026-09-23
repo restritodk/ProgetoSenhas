@@ -43,6 +43,7 @@ class StartTicketService
             $locked->forceFill([
                 'status' => TicketStatus::IN_SERVICE,
                 'service_started_at' => now(config('app.timezone')),
+                'started_by_user_id' => $actor->id,
             ])->save();
 
             return $locked->refresh()->load(['ticketType', 'currentDesk']);

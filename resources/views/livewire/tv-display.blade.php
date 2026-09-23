@@ -24,10 +24,26 @@
     wire:poll.3s="refreshFeed"
     class="tv-shell flex flex-col overflow-hidden"
     style="--color-primary: {{ $primaryColor }}; --color-accent: {{ $accentColor }}; --color-primary-dark: {{ $primaryColor }}; --color-primary-light: {{ $primaryColor }};"
-    x-data="tvAudio(@js(['chimeEnabled' => $chimeEnabled, 'speechEnabled' => $speechEnabled, 'chimeVolume' => $chimeVolume]))"
+    x-data="tvAudioUi(@js([
+        'panelToken' => $publicToken,
+        'chimeEnabled' => $chimeEnabled,
+        'speechEnabled' => $speechEnabled,
+        'chimeVolume' => $chimeVolume,
+    ]))"
     x-init="init()"
-    @tv-new-call.window="onNewCall($event.detail)"
 >
+    {{-- Stable audio host: never remounted by Livewire morphs that update calls / highlight. --}}
+    <div
+        wire:ignore
+        class="hidden"
+        aria-hidden="true"
+        x-data
+        x-init="$nextTick(() => window.__humanaTvCallAudio && window.__humanaTvCallAudio.ensure(@js($publicToken), @js([
+            'chimeEnabled' => $chimeEnabled,
+            'speechEnabled' => $speechEnabled,
+            'chimeVolume' => $chimeVolume,
+        ])))"
+    ></div>
     {{-- HEADER --}}
     <header class="tv-header flex shrink-0 items-center justify-between gap-2 border-b-4 border-primary bg-primary px-[max(0.75rem,var(--tv-pad))] sm:gap-4 sm:px-5 lg:px-8" style="color: {{ $onPrimary }};">
         <div class="flex min-w-0 max-w-[55%] items-center lg:max-w-[60%]">
@@ -287,91 +303,155 @@
 </div>
 
 <script>
-    function tvAudio(options = {}) {
-        return {
-            soundEnabled: false,
-            speaking: false,
-            isFullscreen: false,
-            clinicChimeEnabled: options.chimeEnabled !== false,
-            clinicSpeechEnabled: options.speechEnabled !== false,
-            chimeVolume: Math.max(0, Math.min(100, Number(options.chimeVolume ?? 70))),
-            init() {
-                document.addEventListener('fullscreenchange', () => {
-                    this.isFullscreen = Boolean(document.fullscreenElement);
-                });
-            },
-            enableSound() {
-                // Unlocks CALL AUDIO only (chime + speechSynthesis). Media audio is independent.
-                this.soundEnabled = true;
-                if (this.clinicChimeEnabled) {
-                    this.playChime();
+    (function () {
+        if (window.__humanaTvCallAudio) {
+            return;
+        }
+
+        const storageKey = (token) => 'tvCallAudioUnlocked:' + token;
+
+        window.__humanaTvCallAudio = {
+            panels: Object.create(null),
+
+            ensure(token, options = {}) {
+                if (!token) {
+                    return this.panels[token];
                 }
-            },
-            toggleFullscreen() {
-                const root = document.documentElement;
-                if (!document.fullscreenElement) {
-                    if (root.requestFullscreen) {
-                        root.requestFullscreen().catch(() => {});
+
+                if (!this.panels[token]) {
+                    this.panels[token] = {
+                        soundEnabled: false,
+                        speaking: false,
+                        lastPlayedCallId: null,
+                        audioCtx: null,
+                        clinicChimeEnabled: options.chimeEnabled !== false,
+                        clinicSpeechEnabled: options.speechEnabled !== false,
+                        chimeVolume: Math.max(0, Math.min(100, Number(options.chimeVolume ?? 70))),
+                    };
+
+                    try {
+                        this.panels[token].soundEnabled = sessionStorage.getItem(storageKey(token)) === '1';
+                    } catch (e) {
+                        this.panels[token].soundEnabled = false;
                     }
-                } else if (document.exitFullscreen) {
-                    document.exitFullscreen().catch(() => {});
+                } else {
+                    this.panels[token].clinicChimeEnabled = options.chimeEnabled !== false;
+                    this.panels[token].clinicSpeechEnabled = options.speechEnabled !== false;
+                    this.panels[token].chimeVolume = Math.max(0, Math.min(100, Number(options.chimeVolume ?? 70)));
+                }
+
+                return this.panels[token];
+            },
+
+            isEnabled(token) {
+                return Boolean(this.panels[token]?.soundEnabled);
+            },
+
+            async enable(token, options = {}) {
+                const panel = this.ensure(token, options);
+                panel.soundEnabled = true;
+
+                try {
+                    sessionStorage.setItem(storageKey(token), '1');
+                } catch (e) {}
+
+                // Unlock AudioContext inside the user gesture for this tab/panel instance.
+                await this.ensureAudioContext(panel);
+
+                if (panel.clinicChimeEnabled) {
+                    await this.playChime(panel);
+                }
+
+                return true;
+            },
+
+            async ensureAudioContext(panel) {
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioCtx) {
+                        return null;
+                    }
+                    if (!panel.audioCtx || panel.audioCtx.state === 'closed') {
+                        panel.audioCtx = new AudioCtx();
+                    }
+                    if (panel.audioCtx.state === 'suspended') {
+                        await panel.audioCtx.resume();
+                    }
+                    return panel.audioCtx;
+                } catch (e) {
+                    return null;
                 }
             },
-            onNewCall(detail) {
-                if (!this.soundEnabled) {
+
+            announce(payload) {
+                if (!payload || typeof payload !== 'object') {
                     return;
                 }
 
-                window.dispatchEvent(new CustomEvent('tv-call-audio-begin'));
+                const token = payload.panelToken;
+                const callId = payload.callId != null ? Number(payload.callId) : null;
+                const panel = this.panels[token] || this.ensure(token);
 
-                const finishCallAudio = () => {
-                    window.dispatchEvent(new CustomEvent('tv-call-audio-end'));
+                if (!panel.soundEnabled) {
+                    return;
+                }
+
+                // Per-instance dedupe only — other TVs keep their own cursor.
+                if (callId !== null && panel.lastPlayedCallId === callId) {
+                    return;
+                }
+                if (callId !== null) {
+                    panel.lastPlayedCallId = callId;
+                }
+
+                window.dispatchEvent(new CustomEvent('tv-call-audio-begin', { detail: { panelToken: token, callId } }));
+
+                const finish = () => {
+                    window.dispatchEvent(new CustomEvent('tv-call-audio-end', { detail: { panelToken: token, callId } }));
                 };
 
                 const runSpeech = () => {
-                    if (this.clinicSpeechEnabled) {
-                        this.speak(detail.announcement || '', finishCallAudio);
+                    if (panel.clinicSpeechEnabled) {
+                        this.speak(panel, payload.announcement || '', finish);
                     } else {
-                        finishCallAudio();
+                        finish();
                     }
                 };
 
-                if (this.clinicChimeEnabled) {
-                    this.playChime().then(runSpeech).catch(runSpeech);
+                if (panel.clinicChimeEnabled) {
+                    this.playChime(panel).then(runSpeech).catch(runSpeech);
                 } else {
                     runSpeech();
                 }
             },
-            async playChime() {
+
+            async playChime(panel) {
                 try {
-                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                    if (!AudioCtx) {
+                    const ctx = await this.ensureAudioContext(panel);
+                    if (!ctx) {
                         return;
-                    }
-                    const ctx = new AudioCtx();
-                    if (ctx.state === 'suspended') {
-                        await ctx.resume();
                     }
                     const osc = ctx.createOscillator();
                     const gain = ctx.createGain();
-                    const peak = Math.max(0.0001, (this.chimeVolume / 100) * 0.2);
+                    const peak = Math.max(0.0001, (panel.chimeVolume / 100) * 0.2);
+                    const t0 = ctx.currentTime;
                     osc.type = 'sine';
-                    osc.frequency.setValueAtTime(880, ctx.currentTime);
-                    osc.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.18);
-                    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(peak, ctx.currentTime + 0.02);
-                    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
+                    osc.frequency.setValueAtTime(880, t0);
+                    osc.frequency.exponentialRampToValueAtTime(660, t0 + 0.18);
+                    gain.gain.setValueAtTime(0.0001, t0);
+                    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
                     osc.connect(gain);
                     gain.connect(ctx.destination);
-                    osc.start();
-                    osc.stop(ctx.currentTime + 0.3);
+                    osc.start(t0);
+                    osc.stop(t0 + 0.3);
                     await new Promise((resolve) => setTimeout(resolve, 320));
-                    await ctx.close();
                 } catch (e) {
                     // Autoplay/policy failures are expected until the operator enables sound.
                 }
             },
-            speak(text, onEnd) {
+
+            speak(panel, text, onEnd) {
                 if (!text || !('speechSynthesis' in window)) {
                     if (typeof onEnd === 'function') {
                         onEnd();
@@ -382,20 +462,59 @@
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = 'pt-BR';
                 utterance.rate = 0.95;
-                this.speaking = true;
+                panel.speaking = true;
                 utterance.onend = () => {
-                    this.speaking = false;
+                    panel.speaking = false;
                     if (typeof onEnd === 'function') {
                         onEnd();
                     }
                 };
                 utterance.onerror = () => {
-                    this.speaking = false;
+                    panel.speaking = false;
                     if (typeof onEnd === 'function') {
                         onEnd();
                     }
                 };
                 window.speechSynthesis.speak(utterance);
+            },
+        };
+    })();
+
+    function tvAudioUi(options = {}) {
+        const token = options.panelToken || '';
+
+        return {
+            soundEnabled: false,
+            isFullscreen: false,
+            panelToken: token,
+            init() {
+                if (window.__humanaTvCallAudio) {
+                    window.__humanaTvCallAudio.ensure(token, options);
+                    this.soundEnabled = window.__humanaTvCallAudio.isEnabled(token);
+                }
+                document.addEventListener('fullscreenchange', () => {
+                    this.isFullscreen = Boolean(document.fullscreenElement);
+                });
+            },
+            async enableSound() {
+                if (!window.__humanaTvCallAudio) {
+                    return;
+                }
+                // Set UI state before awaiting audio unlock so a Livewire morph mid-await
+                // cannot leave the button stuck on "Ativar som" while the host is enabled.
+                this.soundEnabled = true;
+                await window.__humanaTvCallAudio.enable(token, options);
+                this.soundEnabled = window.__humanaTvCallAudio.isEnabled(token);
+            },
+            toggleFullscreen() {
+                const root = document.documentElement;
+                if (!document.fullscreenElement) {
+                    if (root.requestFullscreen) {
+                        root.requestFullscreen().catch(() => {});
+                    }
+                } else if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(() => {});
+                }
             },
         };
     }

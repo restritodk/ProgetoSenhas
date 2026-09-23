@@ -43,7 +43,12 @@ class TicketIssuanceTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('tickets.issue'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('tickets.issue'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
 
         Livewire::actingAs($user)
             ->test(TicketIssuer::class)

@@ -3,12 +3,14 @@
 namespace App\Livewire;
 
 use App\Actions\CreateTicketType;
+use App\Actions\DeleteTicketType;
 use App\Actions\UpdateTicketType;
 use App\Models\TicketType;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\WithPagination;
 
@@ -34,7 +36,19 @@ class TicketTypesManager extends Component
 
     public ?int $ticketTypePendingDeactivationId = null;
 
+    public ?int $ticketTypePendingActivationId = null;
+
+    public ?int $ticketTypePendingDeletionId = null;
+
+    public bool $showDeleteBlockedModal = false;
+
+    public string $deleteBlockedName = '';
+
     public string $statusMessage = '';
+
+    public string $errorMessage = '';
+
+    public bool $actionProcessing = false;
 
     public function mount(): void
     {
@@ -49,6 +63,12 @@ class TicketTypesManager extends Component
     public function updatedStatusFilter(): void
     {
         $this->resetPage();
+    }
+
+    public function clearStatusMessage(): void
+    {
+        $this->statusMessage = '';
+        $this->errorMessage = '';
     }
 
     public function startCreate(): void
@@ -69,8 +89,9 @@ class TicketTypesManager extends Component
         $this->priority = (string) $ticketType->priority;
         $this->active = $ticketType->active;
         $this->showForm = true;
-        $this->ticketTypePendingDeactivationId = null;
+        $this->clearPendingDialogs();
         $this->statusMessage = '';
+        $this->errorMessage = '';
     }
 
     public function cancel(): void
@@ -96,7 +117,7 @@ class TicketTypesManager extends Component
         if ($this->editingTicketTypeId !== null) {
             $ticketType = $this->ticketTypeForCurrentClinic($this->editingTicketTypeId);
             $updateTicketType->handle($actor, $ticketType, $attributes);
-            $message = 'Tipo de senha atualizado com sucesso.';
+            $message = 'Alterações salvas com sucesso.';
         } else {
             $createTicketType->handle($actor, $attributes);
             $message = 'Tipo de senha criado com sucesso.';
@@ -104,6 +125,7 @@ class TicketTypesManager extends Component
 
         $this->resetForm();
         $this->statusMessage = $message;
+        $this->errorMessage = '';
         $this->resetPage();
     }
 
@@ -111,49 +133,163 @@ class TicketTypesManager extends Component
     {
         $ticketType = $this->ticketTypeForCurrentClinic($ticketTypeId);
         $this->authorize('update', $ticketType);
+        $this->clearPendingDialogs();
         $this->ticketTypePendingDeactivationId = $ticketType->id;
     }
 
     public function cancelDeactivation(): void
     {
         $this->ticketTypePendingDeactivationId = null;
+        $this->actionProcessing = false;
     }
 
     public function deactivate(UpdateTicketType $updateTicketType): void
     {
         abort_if($this->ticketTypePendingDeactivationId === null, 404);
+        if ($this->actionProcessing) {
+            return;
+        }
 
-        $actor = auth()->user();
-        $ticketType = $this->ticketTypeForCurrentClinic($this->ticketTypePendingDeactivationId);
-        $this->authorize('update', $ticketType);
+        $this->actionProcessing = true;
 
-        $updateTicketType->handle($actor, $ticketType, [
-            'name' => $ticketType->name,
-            'prefix' => $ticketType->prefix,
-            'priority' => $ticketType->priority,
-            'active' => false,
-        ]);
+        try {
+            $actor = auth()->user();
+            $ticketType = $this->ticketTypeForCurrentClinic($this->ticketTypePendingDeactivationId);
+            $this->authorize('update', $ticketType);
 
-        $this->ticketTypePendingDeactivationId = null;
-        $this->statusMessage = 'Tipo de senha desativado.';
-        $this->resetPage();
+            $updateTicketType->handle($actor, $ticketType, [
+                'name' => $ticketType->name,
+                'prefix' => $ticketType->prefix,
+                'priority' => $ticketType->priority,
+                'active' => false,
+            ]);
+
+            $this->ticketTypePendingDeactivationId = null;
+            $this->statusMessage = 'Tipo de senha desativado com sucesso.';
+            $this->errorMessage = '';
+            $this->resetPage();
+        } finally {
+            $this->actionProcessing = false;
+        }
     }
 
-    public function activate(int $ticketTypeId, UpdateTicketType $updateTicketType): void
+    public function confirmActivation(int $ticketTypeId): void
     {
-        $actor = auth()->user();
         $ticketType = $this->ticketTypeForCurrentClinic($ticketTypeId);
         $this->authorize('update', $ticketType);
+        $this->clearPendingDialogs();
+        $this->ticketTypePendingActivationId = $ticketType->id;
+    }
 
-        $updateTicketType->handle($actor, $ticketType, [
-            'name' => $ticketType->name,
-            'prefix' => $ticketType->prefix,
-            'priority' => $ticketType->priority,
-            'active' => true,
-        ]);
+    public function cancelActivation(): void
+    {
+        $this->ticketTypePendingActivationId = null;
+        $this->actionProcessing = false;
+    }
 
-        $this->statusMessage = 'Tipo de senha ativado.';
-        $this->resetPage();
+    public function activate(UpdateTicketType $updateTicketType): void
+    {
+        abort_if($this->ticketTypePendingActivationId === null, 404);
+        if ($this->actionProcessing) {
+            return;
+        }
+
+        $this->actionProcessing = true;
+
+        try {
+            $actor = auth()->user();
+            $ticketType = $this->ticketTypeForCurrentClinic($this->ticketTypePendingActivationId);
+            $this->authorize('update', $ticketType);
+
+            $updateTicketType->handle($actor, $ticketType, [
+                'name' => $ticketType->name,
+                'prefix' => $ticketType->prefix,
+                'priority' => $ticketType->priority,
+                'active' => true,
+            ]);
+
+            $this->ticketTypePendingActivationId = null;
+            $this->statusMessage = 'Tipo de senha ativado com sucesso.';
+            $this->errorMessage = '';
+            $this->resetPage();
+        } finally {
+            $this->actionProcessing = false;
+        }
+    }
+
+    public function confirmDeletion(int $ticketTypeId, DeleteTicketType $deleteTicketType): void
+    {
+        $ticketType = $this->ticketTypeForCurrentClinic($ticketTypeId);
+        $this->authorize('delete', $ticketType);
+        $this->clearPendingDialogs();
+
+        if ($deleteTicketType->hasOperationalHistory($ticketType)) {
+            $this->deleteBlockedName = $ticketType->name;
+            $this->showDeleteBlockedModal = true;
+
+            return;
+        }
+
+        $this->ticketTypePendingDeletionId = $ticketType->id;
+    }
+
+    public function cancelDeletion(): void
+    {
+        $this->ticketTypePendingDeletionId = null;
+        $this->actionProcessing = false;
+    }
+
+    public function dismissDeleteBlocked(): void
+    {
+        $this->showDeleteBlockedModal = false;
+        $this->deleteBlockedName = '';
+    }
+
+    public function delete(DeleteTicketType $deleteTicketType): void
+    {
+        abort_if($this->ticketTypePendingDeletionId === null, 404);
+        if ($this->actionProcessing) {
+            return;
+        }
+
+        $this->actionProcessing = true;
+        $ticketType = $this->ticketTypeForCurrentClinic($this->ticketTypePendingDeletionId);
+
+        try {
+            $actor = auth()->user();
+            $deleteTicketType->handle($actor, $ticketType);
+
+            $this->ticketTypePendingDeletionId = null;
+            $this->statusMessage = 'Tipo de senha excluído com sucesso.';
+            $this->errorMessage = '';
+            $this->resetPage();
+        } catch (ValidationException $exception) {
+            $this->ticketTypePendingDeletionId = null;
+            $this->deleteBlockedName = $ticketType->name;
+            $this->showDeleteBlockedModal = true;
+            $this->errorMessage = collect($exception->errors())->flatten()->first()
+                ?? 'Não foi possível excluir este tipo.';
+        } finally {
+            $this->actionProcessing = false;
+        }
+    }
+
+    /**
+     * @return array{total: int, active: int, inactive: int}
+     */
+    public function summaryCounts(): array
+    {
+        $clinicId = auth()->user()?->clinic_id;
+        $base = TicketType::query()->where('clinic_id', $clinicId);
+
+        $total = (clone $base)->count();
+        $active = (clone $base)->where('active', true)->count();
+
+        return [
+            'total' => $total,
+            'active' => $active,
+            'inactive' => max(0, $total - $active),
+        ];
     }
 
     /**
@@ -182,8 +318,23 @@ class TicketTypesManager extends Component
 
     public function render(): View
     {
+        $pendingDeactivation = $this->ticketTypePendingDeactivationId !== null
+            ? $this->ticketTypeForCurrentClinic($this->ticketTypePendingDeactivationId)
+            : null;
+        $pendingActivation = $this->ticketTypePendingActivationId !== null
+            ? $this->ticketTypeForCurrentClinic($this->ticketTypePendingActivationId)
+            : null;
+        $pendingDeletion = $this->ticketTypePendingDeletionId !== null
+            ? $this->ticketTypeForCurrentClinic($this->ticketTypePendingDeletionId)
+            : null;
+
         return view('livewire.ticket-types-manager', [
             'ticketTypes' => $this->ticketTypes(),
+            'summary' => $this->summaryCounts(),
+            'pendingDeactivation' => $pendingDeactivation,
+            'pendingActivation' => $pendingActivation,
+            'pendingDeletion' => $pendingDeletion,
+            'unitTicketTypesUrl' => route('unit-ticket-types.index'),
         ]);
     }
 
@@ -236,6 +387,16 @@ class TicketTypesManager extends Component
             ->firstOrFail();
     }
 
+    private function clearPendingDialogs(): void
+    {
+        $this->ticketTypePendingDeactivationId = null;
+        $this->ticketTypePendingActivationId = null;
+        $this->ticketTypePendingDeletionId = null;
+        $this->showDeleteBlockedModal = false;
+        $this->deleteBlockedName = '';
+        $this->actionProcessing = false;
+    }
+
     private function resetForm(): void
     {
         $this->resetValidation();
@@ -245,6 +406,6 @@ class TicketTypesManager extends Component
         $this->prefix = '';
         $this->priority = '10';
         $this->active = true;
-        $this->ticketTypePendingDeactivationId = null;
+        $this->clearPendingDialogs();
     }
 }

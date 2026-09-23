@@ -7,15 +7,19 @@ use App\Models\Desk;
 use App\Models\DisplayPanel;
 use App\Models\Kiosk;
 use App\Models\MediaItem;
+use App\Models\Sector;
 use App\Models\Ticket;
 use App\Models\TicketType;
-use App\Models\Unit;
 use App\Models\User;
 use App\Services\ClinicBranding;
+use App\Services\ClinicMessageInbox;
 use App\Services\ClinicSettings;
 use App\Services\OperationalContext;
 use App\Support\AdminNavigation;
 use App\Support\AdminPresentation;
+use App\Support\AttendantNavigation;
+use App\Support\PermissionCatalog;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -28,6 +32,12 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        foreach (PermissionCatalog::keys() as $permissionKey) {
+            Gate::define($permissionKey, function (User $user) use ($permissionKey): bool {
+                return $user->hasPermission($permissionKey);
+            });
+        }
+
         View::composer('layouts.admin', function ($view): void {
             $user = auth()->user();
             $sections = AdminNavigation::sections();
@@ -36,25 +46,38 @@ class AppServiceProvider extends ServiceProvider
                 $section['items'] = array_values(array_filter(
                     $section['items'],
                     function (array $item) use ($user): bool {
+                        if (! ($item['available'] ?? false)) {
+                            return false;
+                        }
+
                         return match ($item['route'] ?? null) {
-                            'clinic.show' => $user?->clinic !== null && $user->can('manage', $user->clinic),
+                            'dashboard' => $user?->hasPermission('dashboard.view') ?? false,
+                            'clinic.show' => $user?->clinic !== null && $user->can('view', $user->clinic),
                             'settings.index' => $user?->can('viewAny', ClinicSetting::class) ?? false,
                             'users.index' => $user?->can('viewAny', User::class) ?? false,
+                            'roles.index' => $user?->hasPermission('roles.view') ?? false,
                             'desks.index' => $user?->can('viewAny', Desk::class) ?? false,
+                            'sectors.index' => $user?->can('viewAny', Sector::class) ?? false,
                             'display-panels.index' => $user?->can('viewAny', DisplayPanel::class) ?? false,
                             'media-items.index' => $user?->can('viewAny', MediaItem::class) ?? false,
                             'kiosks.index' => $user?->can('viewAny', Kiosk::class) ?? false,
-                            'unit-ticket-types.index' => $user?->can('manageAny', Unit::class) ?? false,
+                            'unit-ticket-types.index' => $user?->hasPermission('unit_ticket_types.manage') ?? false,
                             'ticket-types.index' => $user?->can('viewAny', TicketType::class) ?? false,
                             'tickets.issue' => $user?->can('create', Ticket::class) ?? false,
+                            'queue-policies.index' => $user?->hasPermission('queue_policy.view') ?? false,
                             'attendant.panel' => $user?->canAccessAttendantPanel() ?? false,
-                            default => true,
+                            default => false,
                         };
                     },
                 ));
 
                 return $section;
             }, $sections);
+
+            $sections = array_values(array_filter(
+                $sections,
+                fn (array $section): bool => $section['items'] !== [],
+            ));
 
             $context = app(OperationalContext::class);
             $clinic = $user?->clinic;
@@ -77,11 +100,28 @@ class AppServiceProvider extends ServiceProvider
         View::composer('layouts.attendant', function ($view): void {
             $user = auth()->user();
             $context = app(OperationalContext::class);
+            $clinic = $user?->clinic;
+            $branding = $clinic
+                ? AdminPresentation::forClinic(
+                    $clinic,
+                    app(ClinicSettings::class),
+                    app(ClinicBranding::class),
+                )->toArray()
+                : [];
+
+            $unread = $user
+                ? app(ClinicMessageInbox::class)->unreadCountFor($user)
+                : 0;
 
             $view->with([
-                'currentClinic' => $user?->clinic,
+                'currentClinic' => $clinic,
                 'activeUnit' => $user ? $context->activeUnit($user, session()) : null,
                 'activeDesk' => $user ? $context->activeDesk($user, session()) : null,
+                'attendantBranding' => $branding,
+                'attendantNavItems' => $user ? AttendantNavigation::items($user, $unread) : [],
+                'showAdminShortcut' => $user !== null
+                    && ! $user->isAttendant()
+                    && $user->hasPermission('dashboard.view'),
             ]);
         });
     }

@@ -2,6 +2,8 @@
 
 namespace App\Actions;
 
+use App\Models\Sector;
+use App\Models\SectorTicketType;
 use App\Models\TicketType;
 use App\Models\Unit;
 use App\Models\UnitTicketType;
@@ -59,6 +61,41 @@ class SyncUnitTicketTypes
                     'display_name' => $displayName,
                     'position' => max(0, (int) $row['position']),
                 ])->save();
+            }
+
+            // Keep sector catalogs aligned with the unit catalog until a dedicated
+            // per-sector admin UI is introduced. Existing sector rows are upserted.
+            $sectors = Sector::query()
+                ->where('clinic_id', $actor->clinic_id)
+                ->where('unit_id', $unit->id)
+                ->get(['id', 'clinic_id']);
+
+            foreach ($sectors as $sector) {
+                foreach ($rows as $row) {
+                    $displayName = isset($row['display_name']) ? trim((string) $row['display_name']) : '';
+                    $displayName = $displayName === '' ? null : mb_substr($displayName, 0, 255);
+
+                    $offer = SectorTicketType::query()
+                        ->where('clinic_id', $actor->clinic_id)
+                        ->where('sector_id', $sector->id)
+                        ->where('ticket_type_id', $row['ticket_type_id'])
+                        ->first();
+
+                    if ($offer === null) {
+                        $offer = new SectorTicketType;
+                        $offer->forceFill([
+                            'clinic_id' => $actor->clinic_id,
+                            'sector_id' => $sector->id,
+                            'ticket_type_id' => $row['ticket_type_id'],
+                        ]);
+                    }
+
+                    $offer->forceFill([
+                        'active' => (bool) $row['active'],
+                        'display_name' => $displayName,
+                        'position' => max(0, (int) $row['position']),
+                    ])->save();
+                }
             }
         });
     }

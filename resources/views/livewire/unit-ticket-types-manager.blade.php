@@ -3,7 +3,7 @@
         <x-ui.alert type="success" class="mb-4">{{ $statusMessage }}</x-ui.alert>
     @endif
 
-    <x-ui.card title="Tipos de senha por unidade" description="Define quais tipos o Totem oferecece nessa unidade, a ordem dos botões e o nome exibido ao público.">
+    <x-ui.card title="Tipos de senha por unidade" description="Define quais tipos o Totem oferecece nesta unidade, a ordem dos botões e o nome exibido ao público. Um tipo ativo na clínica só aparece no Totem se estiver marcado como “Oferecer” aqui.">
         <div class="mb-6 max-w-md">
             <x-ui.select label="Unidade" name="utt_unit_id" id="utt_unit_id" wire:model.live="unitId" required>
                 <option value="">Selecione a unidade</option>

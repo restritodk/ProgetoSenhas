@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Actions\EnsureDefaultSectorForUnit;
 use App\Models\Clinic;
 use App\Models\Kiosk;
 use App\Models\Unit;
@@ -17,6 +18,7 @@ class KioskFactory extends Factory
         return [
             'clinic_id' => Clinic::factory(),
             'unit_id' => null,
+            'sector_id' => null,
             'name' => 'Totem '.$this->faker->unique()->numerify('##'),
             'code' => 'K'.$this->faker->unique()->numerify('##'),
             'public_token' => Kiosk::generatePublicToken(),
@@ -39,6 +41,13 @@ class KioskFactory extends Factory
 
             if ($kiosk->unit_id === null) {
                 $kiosk->unit_id = Unit::factory()->create(['clinic_id' => $kiosk->clinic_id])->id;
+            }
+
+            if ($kiosk->sector_id === null && $kiosk->unit_id !== null) {
+                $unit = Unit::query()->find($kiosk->unit_id);
+                if ($unit !== null) {
+                    $kiosk->sector_id = app(EnsureDefaultSectorForUnit::class)->handle($unit)->id;
+                }
             }
         });
     }

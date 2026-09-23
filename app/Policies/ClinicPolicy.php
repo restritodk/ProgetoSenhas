@@ -9,17 +9,18 @@ class ClinicPolicy
 {
     public function view(User $user, Clinic $clinic): bool
     {
-        return $this->sameActiveClinic($user, $clinic);
+        return $this->sameActiveClinic($user, $clinic) && $user->hasPermission('clinic.view');
     }
 
     public function update(User $user, Clinic $clinic): bool
     {
-        return $this->sameActiveClinic($user, $clinic) && $user->isAdministrator();
+        return $this->sameActiveClinic($user, $clinic) && $user->hasPermission('clinic.update');
     }
 
     public function manage(User $user, Clinic $clinic): bool
     {
-        return $this->update($user, $clinic);
+        return $this->sameActiveClinic($user, $clinic)
+            && ($user->hasPermission('clinic.update') || $user->hasPermission('units.manage'));
     }
 
     private function sameActiveClinic(User $user, Clinic $clinic): bool

@@ -3,9 +3,11 @@
 namespace App\Livewire;
 
 use App\Actions\CreateKiosk;
+use App\Actions\EnsureDefaultSectorForUnit;
 use App\Actions\RegenerateKioskToken;
 use App\Actions\UpdateKiosk;
 use App\Models\Kiosk;
+use App\Models\Sector;
 use App\Models\Unit;
 use App\Services\ClinicBranding;
 use App\Services\KioskPrintGrantService;
@@ -37,6 +39,8 @@ class KiosksManager extends Component
     public string $code = '';
 
     public ?int $unitId = null;
+
+    public ?int $sectorId = null;
 
     public bool $active = true;
 
@@ -102,6 +106,36 @@ class KiosksManager extends Component
         $this->resetPage();
     }
 
+    public function updatedUnitId(): void
+    {
+        $this->sectorId = null;
+
+        if ($this->unitId === null) {
+            return;
+        }
+
+        $unit = Unit::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->whereKey($this->unitId)
+            ->first();
+
+        if ($unit === null) {
+            return;
+        }
+
+        $defaultSectorId = Sector::query()
+            ->where('clinic_id', $unit->clinic_id)
+            ->where('unit_id', $unit->id)
+            ->where('code', EnsureDefaultSectorForUnit::DEFAULT_CODE)
+            ->value('id');
+
+        if ($defaultSectorId === null) {
+            $defaultSectorId = app(EnsureDefaultSectorForUnit::class)->handle($unit)->id;
+        }
+
+        $this->sectorId = (int) $defaultSectorId;
+    }
+
     public function startCreate(): void
     {
         $this->authorize('create', Kiosk::class);
@@ -118,6 +152,7 @@ class KiosksManager extends Component
         $this->name = $kiosk->name;
         $this->code = $kiosk->code;
         $this->unitId = $kiosk->unit_id;
+        $this->sectorId = $kiosk->sector_id;
         $this->active = $kiosk->active;
         $this->printEnabled = (bool) $kiosk->print_enabled;
         $this->printAgentListenMode = app(KioskPrintGrantService::class)->normalizeListenMode($kiosk->print_agent_listen_mode ?? 'local');
@@ -157,6 +192,7 @@ class KiosksManager extends Component
             'name' => $this->name,
             'code' => $this->code,
             'unit_id' => (int) $this->unitId,
+            'sector_id' => (int) $this->sectorId,
             'active' => $this->active,
         ];
 
@@ -358,6 +394,7 @@ class KiosksManager extends Component
             'name' => $kiosk->name,
             'code' => $kiosk->code,
             'unit_id' => $kiosk->unit_id,
+            'sector_id' => $kiosk->sector_id,
             'active' => false,
         ]);
 
@@ -376,6 +413,7 @@ class KiosksManager extends Component
             'name' => $kiosk->name,
             'code' => $kiosk->code,
             'unit_id' => $kiosk->unit_id,
+            'sector_id' => $kiosk->sector_id,
             'active' => true,
         ]);
 
@@ -424,7 +462,7 @@ class KiosksManager extends Component
         $clinicId = auth()->user()?->clinic_id;
 
         return Kiosk::query()
-            ->with(['unit:id,name,clinic_id'])
+            ->with(['unit:id,name,clinic_id', 'sector:id,name,unit_id,clinic_id'])
             ->where('clinic_id', $clinicId)
             ->when($this->search !== '', function ($query): void {
                 $term = '%'.mb_strtolower($this->search).'%';
@@ -452,6 +490,24 @@ class KiosksManager extends Component
             ->orderBy('name')
             ->orderBy('id')
             ->get(['id', 'name', 'clinic_id', 'active']);
+    }
+
+    /**
+     * @return Collection<int, Sector>
+     */
+    #[Computed]
+    public function availableSectors(): Collection
+    {
+        if ($this->unitId === null) {
+            return new Collection;
+        }
+
+        return Sector::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->where('unit_id', $this->unitId)
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name', 'unit_id', 'clinic_id', 'active']);
     }
 
     public function render(): View
@@ -484,6 +540,13 @@ class KiosksManager extends Component
                 'integer',
                 Rule::exists('units', 'id')->where(fn ($query) => $query->where('clinic_id', $clinicId)),
             ],
+            'sectorId' => [
+                'required',
+                'integer',
+                Rule::exists('sectors', 'id')->where(fn ($query) => $query
+                    ->where('clinic_id', $clinicId)
+                    ->where('unit_id', $this->unitId)),
+            ],
             'active' => ['boolean'],
             'printEnabled' => ['boolean'],
             'printAgentListenMode' => ['required', Rule::in(['local', 'lan'])],
@@ -508,6 +571,8 @@ class KiosksManager extends Component
             'code.unique' => 'Já existe um totem com este código nesta clínica.',
             'unitId.required' => 'Selecione a unidade.',
             'unitId.exists' => 'A unidade selecionada não pertence à sua clínica.',
+            'sectorId.required' => 'Selecione o setor.',
+            'sectorId.exists' => 'O setor selecionado não pertence à unidade informada.',
             'printAgentListenMode.in' => 'Selecione o modo Local ou LAN.',
         ];
     }
@@ -561,6 +626,7 @@ class KiosksManager extends Component
         $this->name = '';
         $this->code = '';
         $this->unitId = null;
+        $this->sectorId = null;
         $this->active = true;
         $this->printEnabled = false;
         $this->printAgentListenMode = 'local';

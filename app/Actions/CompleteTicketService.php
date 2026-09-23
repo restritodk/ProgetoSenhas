@@ -43,6 +43,7 @@ class CompleteTicketService
             $locked->forceFill([
                 'status' => TicketStatus::COMPLETED,
                 'completed_at' => now(config('app.timezone')),
+                'completed_by_user_id' => $actor->id,
             ])->save();
 
             return $locked->refresh()->load(['ticketType', 'currentDesk']);

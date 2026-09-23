@@ -3,9 +3,11 @@
 namespace App\Livewire;
 
 use App\Actions\CreateDisplayPanel;
+use App\Actions\EnsureDefaultSectorForUnit;
 use App\Actions\RegenerateDisplayPanelToken;
 use App\Actions\UpdateDisplayPanel;
 use App\Models\DisplayPanel;
+use App\Models\Sector;
 use App\Models\Unit;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
@@ -24,6 +26,8 @@ class DisplayPanelsManager extends Component
 
     public string $unitFilter = '';
 
+    public string $sectorFilter = '';
+
     public string $statusFilter = '';
 
     public bool $showForm = false;
@@ -35,6 +39,8 @@ class DisplayPanelsManager extends Component
     public string $code = '';
 
     public ?int $unitId = null;
+
+    public ?int $sectorId = null;
 
     public bool $active = true;
 
@@ -58,12 +64,48 @@ class DisplayPanelsManager extends Component
 
     public function updatedUnitFilter(): void
     {
+        $this->sectorFilter = '';
+        $this->resetPage();
+    }
+
+    public function updatedSectorFilter(): void
+    {
         $this->resetPage();
     }
 
     public function updatedStatusFilter(): void
     {
         $this->resetPage();
+    }
+
+    public function updatedUnitId(): void
+    {
+        $this->sectorId = null;
+
+        if ($this->unitId === null) {
+            return;
+        }
+
+        $unit = Unit::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->whereKey($this->unitId)
+            ->first();
+
+        if ($unit === null) {
+            return;
+        }
+
+        $defaultSectorId = Sector::query()
+            ->where('clinic_id', $unit->clinic_id)
+            ->where('unit_id', $unit->id)
+            ->where('code', EnsureDefaultSectorForUnit::DEFAULT_CODE)
+            ->value('id');
+
+        if ($defaultSectorId === null) {
+            $defaultSectorId = app(EnsureDefaultSectorForUnit::class)->handle($unit)->id;
+        }
+
+        $this->sectorId = (int) $defaultSectorId;
     }
 
     public function startCreate(): void
@@ -82,6 +124,7 @@ class DisplayPanelsManager extends Component
         $this->name = $panel->name;
         $this->code = $panel->code;
         $this->unitId = $panel->unit_id;
+        $this->sectorId = $panel->primarySector()?->id;
         $this->active = $panel->active;
         $this->showForm = true;
         $this->panelPendingDeactivationId = null;
@@ -106,6 +149,7 @@ class DisplayPanelsManager extends Component
             'name' => $this->name,
             'code' => $this->code,
             'unit_id' => (int) $this->unitId,
+            'sector_ids' => [(int) $this->sectorId],
             'active' => $this->active,
         ];
 
@@ -147,6 +191,7 @@ class DisplayPanelsManager extends Component
             'name' => $panel->name,
             'code' => $panel->code,
             'unit_id' => $panel->unit_id,
+            'sector_ids' => $this->sectorIdsForPanel($panel),
             'active' => false,
         ]);
 
@@ -165,6 +210,7 @@ class DisplayPanelsManager extends Component
             'name' => $panel->name,
             'code' => $panel->code,
             'unit_id' => $panel->unit_id,
+            'sector_ids' => $this->sectorIdsForPanel($panel),
             'active' => true,
         ]);
 
@@ -213,7 +259,7 @@ class DisplayPanelsManager extends Component
         $clinicId = auth()->user()?->clinic_id;
 
         return DisplayPanel::query()
-            ->with(['unit:id,name,clinic_id'])
+            ->with(['unit:id,name,clinic_id', 'sectors:id,name,unit_id,clinic_id'])
             ->where('clinic_id', $clinicId)
             ->when($this->search !== '', function ($query): void {
                 $term = '%'.Str::lower($this->search).'%';
@@ -223,6 +269,10 @@ class DisplayPanelsManager extends Component
                 });
             })
             ->when($this->unitFilter !== '', fn ($query) => $query->where('unit_id', (int) $this->unitFilter))
+            ->when($this->sectorFilter !== '', function ($query): void {
+                $sectorId = (int) $this->sectorFilter;
+                $query->whereHas('sectors', fn ($sectors) => $sectors->where('sectors.id', $sectorId));
+            })
             ->when($this->statusFilter === 'active', fn ($query) => $query->where('active', true))
             ->when($this->statusFilter === 'inactive', fn ($query) => $query->where('active', false))
             ->orderBy('name')
@@ -241,6 +291,52 @@ class DisplayPanelsManager extends Component
             ->orderBy('name')
             ->orderBy('id')
             ->get(['id', 'name', 'clinic_id', 'active']);
+    }
+
+    /**
+     * Setores do formulário (cascata Unidade → Setor).
+     *
+     * @return Collection<int, Sector>
+     */
+    #[Computed]
+    public function availableSectors(): Collection
+    {
+        if ($this->unitId === null) {
+            return new Collection;
+        }
+
+        return Sector::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->where('unit_id', $this->unitId)
+            ->where(function ($query): void {
+                $query->where('active', true);
+                if ($this->sectorId !== null) {
+                    $query->orWhereKey($this->sectorId);
+                }
+            })
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name', 'unit_id', 'clinic_id', 'active']);
+    }
+
+    /**
+     * Setores do filtro da listagem (depende da unidade filtrada).
+     *
+     * @return Collection<int, Sector>
+     */
+    #[Computed]
+    public function filterSectors(): Collection
+    {
+        if ($this->unitFilter === '') {
+            return new Collection;
+        }
+
+        return Sector::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->where('unit_id', (int) $this->unitFilter)
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name', 'unit_id', 'clinic_id', 'active']);
     }
 
     public function render(): View
@@ -273,6 +369,13 @@ class DisplayPanelsManager extends Component
                 'integer',
                 Rule::exists('units', 'id')->where(fn ($query) => $query->where('clinic_id', $clinicId)),
             ],
+            'sectorId' => [
+                'required',
+                'integer',
+                Rule::exists('sectors', 'id')->where(fn ($query) => $query
+                    ->where('clinic_id', $clinicId)
+                    ->where('unit_id', $this->unitId)),
+            ],
             'active' => ['boolean'],
         ];
     }
@@ -289,6 +392,8 @@ class DisplayPanelsManager extends Component
             'code.unique' => 'Já existe um painel com este código nesta clínica.',
             'unitId.required' => 'Selecione a unidade.',
             'unitId.exists' => 'A unidade selecionada não pertence à sua clínica.',
+            'sectorId.required' => 'Selecione o setor do painel.',
+            'sectorId.exists' => 'O setor selecionado não pertence à unidade informada.',
         ];
     }
 
@@ -300,6 +405,27 @@ class DisplayPanelsManager extends Component
             ->firstOrFail();
     }
 
+    /**
+     * @return list<int>
+     */
+    private function sectorIdsForPanel(DisplayPanel $panel): array
+    {
+        $sectorIds = $panel->sectorIds();
+
+        if ($sectorIds !== []) {
+            return $sectorIds;
+        }
+
+        $panel->loadMissing('unit');
+        $unit = $panel->unit;
+
+        if ($unit === null) {
+            return [];
+        }
+
+        return [(int) app(EnsureDefaultSectorForUnit::class)->handle($unit)->id];
+    }
+
     private function resetForm(): void
     {
         $this->resetValidation();
@@ -308,6 +434,7 @@ class DisplayPanelsManager extends Component
         $this->name = '';
         $this->code = '';
         $this->unitId = null;
+        $this->sectorId = null;
         $this->active = true;
         $this->panelPendingDeactivationId = null;
         $this->panelPendingTokenRegenId = null;

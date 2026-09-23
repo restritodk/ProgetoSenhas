@@ -4,6 +4,8 @@ namespace App\Actions;
 
 use App\Models\Kiosk;
 use App\Models\KioskIssuanceAttempt;
+use App\Models\Sector;
+use App\Models\SectorTicketType;
 use App\Models\Ticket;
 use App\Models\TicketSequence;
 use App\Models\TicketType;
@@ -30,10 +32,12 @@ class IssueTicket
 
         $unit = $this->activeUnitForClinic($actor->clinic_id, $unitId);
         $ticketType = $this->activeTicketTypeForClinic($actor->clinic_id, $ticketTypeId);
+        $sector = app(EnsureDefaultSectorForUnit::class)->handle($unit);
 
         return $this->createTicket(
             clinicId: $actor->clinic_id,
             unit: $unit,
+            sector: $sector,
             ticketType: $ticketType,
             source: TicketSource::ADMIN,
             kioskId: null,
@@ -62,7 +66,7 @@ class IssueTicket
 
         $this->assertKioskRateLimit($kiosk, $clientIp);
 
-        $kiosk->loadMissing(['clinic', 'unit']);
+        $kiosk->loadMissing(['clinic', 'unit', 'sector']);
 
         if (! $kiosk->isOperationallyAvailable()) {
             throw ValidationException::withMessages([
@@ -70,11 +74,11 @@ class IssueTicket
             ]);
         }
 
-        $offer = $this->activeOfferForKiosk($kiosk, $ticketTypeId);
-        $ticketType = $offer->ticketType;
+        $ticketType = $this->activeTicketTypeForKiosk($kiosk, $ticketTypeId);
         $unit = $kiosk->unit;
+        $sector = $kiosk->sector ?? app(EnsureDefaultSectorForUnit::class)->handle($unit);
 
-        return DB::transaction(function () use ($kiosk, $ticketType, $unit, $requestToken, $issuedAt): Ticket {
+        return DB::transaction(function () use ($kiosk, $ticketType, $unit, $sector, $requestToken, $issuedAt): Ticket {
             $attempt = KioskIssuanceAttempt::query()
                 ->where('kiosk_id', $kiosk->id)
                 ->where('request_token', $requestToken)
@@ -123,6 +127,7 @@ class IssueTicket
             $ticket = $this->createTicket(
                 clinicId: $kiosk->clinic_id,
                 unit: $unit,
+                sector: $sector,
                 ticketType: $ticketType,
                 source: TicketSource::KIOSK,
                 kioskId: $kiosk->id,
@@ -138,15 +143,21 @@ class IssueTicket
     private function createTicket(
         int $clinicId,
         Unit $unit,
+        Sector $sector,
         TicketType $ticketType,
         TicketSource $source,
         ?int $kioskId,
         ?CarbonImmutable $issuedAt = null,
     ): Ticket {
+        abort_unless(
+            (int) $sector->clinic_id === $clinicId && (int) $sector->unit_id === (int) $unit->id,
+            500,
+        );
+
         $issuedAt ??= CarbonImmutable::now(config('app.timezone'));
         $sequenceDate = $issuedAt->toDateString();
 
-        return DB::transaction(function () use ($clinicId, $unit, $ticketType, $source, $kioskId, $issuedAt, $sequenceDate): Ticket {
+        return DB::transaction(function () use ($clinicId, $unit, $sector, $ticketType, $source, $kioskId, $issuedAt, $sequenceDate): Ticket {
             $sequenceNumber = $this->allocateNextNumber(
                 clinicId: $clinicId,
                 unitId: $unit->id,
@@ -158,6 +169,7 @@ class IssueTicket
             $ticket->forceFill([
                 'clinic_id' => $clinicId,
                 'unit_id' => $unit->id,
+                'sector_id' => $sector->id,
                 'ticket_type_id' => $ticketType->id,
                 'sequence_number' => $sequenceNumber,
                 'sequence_date' => $sequenceDate,
@@ -184,9 +196,28 @@ class IssueTicket
         RateLimiter::hit($key, 60);
     }
 
-    private function activeOfferForKiosk(Kiosk $kiosk, int $ticketTypeId): UnitTicketType
+    /**
+     * Prefer Sector↔TicketType when the kiosk has a sector; otherwise Unit↔TicketType.
+     * Never trust a browser-supplied type outside that offer set.
+     */
+    private function activeTicketTypeForKiosk(Kiosk $kiosk, int $ticketTypeId): TicketType
     {
-        $offer = UnitTicketType::query()
+        if ($kiosk->sector_id !== null) {
+            $offer = SectorTicketType::query()
+                ->with(['ticketType'])
+                ->where('clinic_id', $kiosk->clinic_id)
+                ->where('sector_id', $kiosk->sector_id)
+                ->where('ticket_type_id', $ticketTypeId)
+                ->where('active', true)
+                ->first();
+
+            if ($offer !== null && $offer->ticketType !== null && $offer->ticketType->active
+                && (int) $offer->ticketType->clinic_id === (int) $kiosk->clinic_id) {
+                return $offer->ticketType;
+            }
+        }
+
+        $unitOffer = UnitTicketType::query()
             ->with(['ticketType'])
             ->where('clinic_id', $kiosk->clinic_id)
             ->where('unit_id', $kiosk->unit_id)
@@ -194,19 +225,19 @@ class IssueTicket
             ->where('active', true)
             ->first();
 
-        if ($offer === null || $offer->ticketType === null || ! $offer->ticketType->active) {
+        if ($unitOffer === null || $unitOffer->ticketType === null || ! $unitOffer->ticketType->active) {
             throw ValidationException::withMessages([
-                'ticketTypeId' => 'O tipo de atendimento selecionado não está disponível.',
+                'ticketTypeId' => 'Esta opção de atendimento acabou de ficar indisponível. Escolha outra opção.',
             ]);
         }
 
-        if ((int) $offer->ticketType->clinic_id !== (int) $kiosk->clinic_id) {
+        if ((int) $unitOffer->ticketType->clinic_id !== (int) $kiosk->clinic_id) {
             throw ValidationException::withMessages([
-                'ticketTypeId' => 'O tipo de atendimento selecionado não está disponível.',
+                'ticketTypeId' => 'Esta opção de atendimento acabou de ficar indisponível. Escolha outra opção.',
             ]);
         }
 
-        return $offer;
+        return $unitOffer->ticketType;
     }
 
     private function allocateNextNumber(int $clinicId, int $unitId, int $ticketTypeId, string $sequenceDate): int

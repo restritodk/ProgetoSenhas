@@ -46,7 +46,12 @@ class UserManagementTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('users.index'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('users.index'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
 
         Livewire::actingAs($user)
             ->test(UsersManager::class)
@@ -328,7 +333,7 @@ class UserManagementTest extends TestCase
 
         $this->actingAs($attendant->fresh())
             ->get(route('dashboard'))
-            ->assertOk();
+            ->assertRedirect(route('attendant.panel'));
     }
 
     public function test_last_active_administrator_cannot_be_deactivated_or_demoted(): void

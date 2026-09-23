@@ -14,7 +14,7 @@ class UnitPolicy
             return false;
         }
 
-        if ($user->isAdministrator()) {
+        if ($user->hasPermission('clinic.view') || $user->hasPermission('units.manage')) {
             return true;
         }
 
@@ -28,7 +28,9 @@ class UnitPolicy
 
     public function manageAny(User $user): bool
     {
-        return $user->active && $this->hasActiveClinic($user) && $user->isAdministrator();
+        return $user->active
+            && $this->hasActiveClinic($user)
+            && $user->hasPermission('units.manage');
     }
 
     public function create(User $user): bool
@@ -38,12 +40,17 @@ class UnitPolicy
 
     public function update(User $user, Unit $unit): bool
     {
-        return $this->belongsToActiveClinic($user, $unit) && $user->isAdministrator();
+        return $this->belongsToActiveClinic($user, $unit) && $user->hasPermission('units.manage');
     }
 
     public function manageTicketTypes(User $user, Unit $unit): bool
     {
-        return $this->update($user, $unit);
+        return $this->belongsToActiveClinic($user, $unit) && $user->hasPermission('unit_ticket_types.manage');
+    }
+
+    public function manageQueuePolicy(User $user, Unit $unit): bool
+    {
+        return $this->belongsToActiveClinic($user, $unit) && $user->hasPermission('queue_policy.update');
     }
 
     public function delete(User $user, Unit $unit): bool

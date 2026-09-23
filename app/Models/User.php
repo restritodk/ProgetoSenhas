@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ClinicPermissionResolver;
 use App\UserRole;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -10,12 +11,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'avatar_path'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
     use HasFactory, Notifiable;
+
+    public const AVATAR_DISK = 'public';
+
+    public const AVATAR_DIRECTORY = 'user-avatars';
 
     public function clinic(): BelongsTo
     {
@@ -25,6 +31,34 @@ class User extends Authenticatable
     public function units(): BelongsToMany
     {
         return $this->belongsToMany(Unit::class)->withPivot('clinic_id')->withTimestamps();
+    }
+
+    public function avatarUrl(): ?string
+    {
+        if ($this->avatar_path === null || $this->avatar_path === '') {
+            return null;
+        }
+
+        return Storage::disk(self::AVATAR_DISK)->url($this->avatar_path);
+    }
+
+    public function initials(): string
+    {
+        $parts = preg_split('/\s+/', trim($this->name)) ?: [];
+        $first = mb_substr($parts[0] ?? 'U', 0, 1);
+        $last = mb_substr($parts[count($parts) - 1] ?? '', 0, 1);
+        if (count($parts) < 2) {
+            return mb_strtoupper($first);
+        }
+
+        return mb_strtoupper($first.$last);
+    }
+
+    public function firstName(): string
+    {
+        $parts = preg_split('/\s+/', trim($this->name)) ?: [];
+
+        return $parts[0] ?? $this->name;
     }
 
     public function hasAccessToUnit(Unit $unit): bool
@@ -53,7 +87,17 @@ class User extends Authenticatable
     {
         return $this->active
             && $this->clinic_id !== null
-            && ($this->isAdministrator() || $this->isSupervisor() || $this->isAttendant());
+            && $this->hasPermission('attendant.access');
+    }
+
+    public function hasPermission(string $permissionKey): bool
+    {
+        if (! $this->active || $this->clinic_id === null || $this->role === null) {
+            return false;
+        }
+
+        return app(ClinicPermissionResolver::class)
+            ->roleHas((int) $this->clinic_id, $this->role, $permissionKey);
     }
 
     public function isAdministrator(): bool
@@ -76,6 +120,7 @@ class User extends Authenticatable
         return [
             'active' => 'boolean',
             'email_verified_at' => 'datetime',
+            'last_seen_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
         ];

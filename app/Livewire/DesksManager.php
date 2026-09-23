@@ -3,8 +3,10 @@
 namespace App\Livewire;
 
 use App\Actions\CreateDesk;
+use App\Actions\EnsureDefaultSectorForUnit;
 use App\Actions\UpdateDesk;
 use App\Models\Desk;
+use App\Models\Sector;
 use App\Models\Unit;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
@@ -36,6 +38,8 @@ class DesksManager extends Component
 
     public ?int $unitId = null;
 
+    public ?int $sectorId = null;
+
     public bool $active = true;
 
     public ?int $deskPendingDeactivationId = null;
@@ -62,6 +66,36 @@ class DesksManager extends Component
         $this->resetPage();
     }
 
+    public function updatedUnitId(): void
+    {
+        $this->sectorId = null;
+
+        if ($this->unitId === null) {
+            return;
+        }
+
+        $unit = Unit::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->whereKey($this->unitId)
+            ->first();
+
+        if ($unit === null) {
+            return;
+        }
+
+        $defaultSectorId = Sector::query()
+            ->where('clinic_id', $unit->clinic_id)
+            ->where('unit_id', $unit->id)
+            ->where('code', EnsureDefaultSectorForUnit::DEFAULT_CODE)
+            ->value('id');
+
+        if ($defaultSectorId === null) {
+            $defaultSectorId = app(EnsureDefaultSectorForUnit::class)->handle($unit)->id;
+        }
+
+        $this->sectorId = (int) $defaultSectorId;
+    }
+
     public function startCreate(): void
     {
         $this->authorize('create', Desk::class);
@@ -78,6 +112,7 @@ class DesksManager extends Component
         $this->name = $desk->name;
         $this->code = $desk->code;
         $this->unitId = $desk->unit_id;
+        $this->sectorId = $desk->sector_id;
         $this->active = $desk->active;
         $this->showForm = true;
         $this->deskPendingDeactivationId = null;
@@ -101,6 +136,7 @@ class DesksManager extends Component
             'name' => $this->name,
             'code' => $this->code,
             'unit_id' => (int) $this->unitId,
+            'sector_id' => (int) $this->sectorId,
             'active' => $this->active,
         ];
 
@@ -143,6 +179,7 @@ class DesksManager extends Component
                 'name' => $desk->name,
                 'code' => $desk->code,
                 'unit_id' => $desk->unit_id,
+                'sector_id' => $desk->sector_id,
                 'active' => false,
             ]);
         } catch (ValidationException $exception) {
@@ -168,6 +205,7 @@ class DesksManager extends Component
             'name' => $desk->name,
             'code' => $desk->code,
             'unit_id' => $desk->unit_id,
+            'sector_id' => $desk->sector_id,
             'active' => true,
         ]);
 
@@ -183,7 +221,7 @@ class DesksManager extends Component
         $clinicId = auth()->user()?->clinic_id;
 
         return Desk::query()
-            ->with(['unit:id,name,clinic_id'])
+            ->with(['unit:id,name,clinic_id', 'sector:id,name,unit_id,clinic_id'])
             ->where('clinic_id', $clinicId)
             ->when($this->search !== '', function ($query): void {
                 $term = '%'.Str::lower($this->search).'%';
@@ -211,6 +249,24 @@ class DesksManager extends Component
             ->orderBy('name')
             ->orderBy('id')
             ->get(['id', 'name', 'clinic_id', 'active']);
+    }
+
+    /**
+     * @return Collection<int, Sector>
+     */
+    #[Computed]
+    public function availableSectors(): Collection
+    {
+        if ($this->unitId === null) {
+            return new Collection;
+        }
+
+        return Sector::query()
+            ->where('clinic_id', auth()->user()?->clinic_id)
+            ->where('unit_id', $this->unitId)
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name', 'unit_id', 'clinic_id', 'active']);
     }
 
     public function render(): View
@@ -243,6 +299,13 @@ class DesksManager extends Component
                 'integer',
                 Rule::exists('units', 'id')->where(fn ($query) => $query->where('clinic_id', $clinicId)),
             ],
+            'sectorId' => [
+                'required',
+                'integer',
+                Rule::exists('sectors', 'id')->where(fn ($query) => $query
+                    ->where('clinic_id', $clinicId)
+                    ->where('unit_id', $this->unitId)),
+            ],
             'active' => ['boolean'],
         ];
     }
@@ -259,6 +322,8 @@ class DesksManager extends Component
             'code.unique' => 'Já existe uma mesa/guichê com este código nesta unidade.',
             'unitId.required' => 'Selecione a unidade.',
             'unitId.exists' => 'A unidade selecionada não pertence à sua clínica.',
+            'sectorId.required' => 'Selecione o setor.',
+            'sectorId.exists' => 'O setor selecionado não pertence à unidade informada.',
         ];
     }
 
@@ -278,6 +343,7 @@ class DesksManager extends Component
         $this->name = '';
         $this->code = '';
         $this->unitId = null;
+        $this->sectorId = null;
         $this->active = true;
         $this->deskPendingDeactivationId = null;
     }

@@ -55,6 +55,11 @@ class UsersManager extends Component
     {
         $this->authorize('viewAny', User::class);
         $this->role = UserRole::ATTENDANT->value;
+
+        $requestedRole = request()->query('role');
+        if (is_string($requestedRole) && UserRole::tryFrom($requestedRole) !== null) {
+            $this->roleFilter = $requestedRole;
+        }
     }
 
     public function updatedSearch(): void

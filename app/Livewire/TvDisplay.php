@@ -75,13 +75,31 @@ class TvDisplay extends Component
             $newCall = $payload['current_call'];
             $newCallId = is_array($newCall) ? (int) $newCall['id'] : null;
 
+            // Cursor is TicketCall.id — role of caller is irrelevant to the TV feed.
             if ($announce && $newCallId !== null && $newCallId !== $this->lastAnnouncedCallId) {
                 $this->highlight = true;
+                $announcement = (string) ($newCall['announcement'] ?? '');
+                $displayCode = (string) ($newCall['display_code'] ?? '');
+
+                // Livewire browser event (tests + any listeners).
                 $this->dispatch(
                     'tv-new-call',
                     callId: $newCallId,
-                    announcement: $newCall['announcement'] ?? '',
-                    displayCode: $newCall['display_code'] ?? '',
+                    announcement: $announcement,
+                    displayCode: $displayCode,
+                );
+
+                // Deliver AFTER DOM morph so Alpine remounts cannot swallow the announce.
+                // Dedup / playback state is per browser tab + panel token (never global consume).
+                $this->js(
+                    'window.__humanaTvCallAudio && window.__humanaTvCallAudio.announce('
+                    .json_encode([
+                        'panelToken' => $this->publicToken,
+                        'callId' => $newCallId,
+                        'announcement' => $announcement,
+                        'displayCode' => $displayCode,
+                    ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)
+                    .')'
                 );
             } else {
                 $this->highlight = false;

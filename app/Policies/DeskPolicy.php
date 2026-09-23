@@ -10,50 +10,44 @@ class DeskPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $this->canManageDesks($user);
+        return $this->activeClinic($user) && $user->hasPermission('desks.view');
     }
 
     public function manageAny(User $user): bool
     {
-        return $this->canManageDesks($user);
+        return $this->viewAny($user);
     }
 
     public function view(User $user, Desk $desk): bool
     {
-        return $this->sameActiveClinic($user, $desk->clinic_id) && $user->isAdministrator();
+        return $this->sameActiveClinic($user, $desk->clinic_id) && $user->hasPermission('desks.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->canManageDesks($user);
+        return $this->activeClinic($user) && $user->hasPermission('desks.create');
     }
 
     public function update(User $user, Desk $desk): bool
     {
-        return $this->sameActiveClinic($user, $desk->clinic_id) && $user->isAdministrator();
+        return $this->sameActiveClinic($user, $desk->clinic_id)
+            && ($user->hasPermission('desks.update') || $user->hasPermission('desks.manage_status'));
     }
 
     public function delete(User $user, Desk $desk): bool
     {
-        return $this->update($user, $desk);
-    }
-
-    private function canManageDesks(User $user): bool
-    {
-        return $user->active && $user->isAdministrator() && $this->hasActiveClinic($user);
+        return $this->sameActiveClinic($user, $desk->clinic_id) && $user->hasPermission('desks.update');
     }
 
     private function sameActiveClinic(User $user, ?int $clinicId): bool
     {
-        return $user->active
-            && $user->clinic_id !== null
-            && $user->clinic_id === $clinicId
-            && $this->hasActiveClinic($user);
+        return $this->activeClinic($user) && $user->clinic_id === $clinicId;
     }
 
-    private function hasActiveClinic(User $user): bool
+    private function activeClinic(User $user): bool
     {
-        return $user->clinic_id !== null
+        return $user->active
+            && $user->clinic_id !== null
             && Clinic::query()->whereKey($user->clinic_id)->where('active', true)->exists();
     }
 }

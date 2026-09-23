@@ -43,6 +43,7 @@ class MarkTicketNoShow
             $locked->forceFill([
                 'status' => TicketStatus::NO_SHOW,
                 'completed_at' => now(config('app.timezone')),
+                'no_show_by_user_id' => $actor->id,
             ])->save();
 
             return $locked->refresh()->load(['ticketType', 'currentDesk']);

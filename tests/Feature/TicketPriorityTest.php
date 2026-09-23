@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\EnsureDefaultSectorForUnit;
 use App\Models\Clinic;
 use App\Models\Ticket;
 use App\Models\TicketType;
@@ -162,6 +163,7 @@ class TicketPriorityTest extends TestCase
         $ticket->forceFill([
             'clinic_id' => $unit->clinic_id,
             'unit_id' => $unit->id,
+            'sector_id' => app(EnsureDefaultSectorForUnit::class)->handle($unit)->id,
             'ticket_type_id' => $type->id,
             'sequence_number' => $sequenceNumber,
             'sequence_date' => $issuedAt->toDateString(),

@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Middleware\EnsureAttendantAreaAccess;
 use App\Http\Middleware\EnsureOperationalContext;
+use App\Http\Middleware\RedirectAttendantFromAdmin;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -29,6 +31,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'operational' => EnsureOperationalContext::class,
+            'attendant.area' => EnsureAttendantAreaAccess::class,
+            'block.attendant.admin' => RedirectAttendantFromAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

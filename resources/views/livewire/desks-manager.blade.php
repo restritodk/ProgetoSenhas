@@ -6,7 +6,7 @@
         <x-ui.alert type="danger" class="mb-4">{{ $message }}</x-ui.alert>
     @enderror
 
-    <x-ui.card title="Mesas / Guichês" description="Configure os pontos de atendimento de cada unidade da clínica.">
+    <x-ui.card title="Mesas / Guichês" description="Pontos de atendimento vinculados a unidade e setor.">
         <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div class="grid flex-1 gap-3 md:grid-cols-3">
                 <x-ui.input label="Buscar" name="desk_search" id="desk_search" wire:model.live.debounce.400ms="search" placeholder="Nome ou código" />
@@ -38,7 +38,7 @@
                     <x-input-error :messages="$errors->get('code')" />
                 </x-ui.input>
                 <div>
-                    <x-ui.select label="Unidade" name="desk_unit_id" id="desk_unit_id" wire:model="unitId" required>
+                    <x-ui.select label="Unidade" name="desk_unit_id" id="desk_unit_id" wire:model.live="unitId" required>
                         <option value="">Selecione</option>
                         @foreach ($this->availableUnits as $unit)
                             <option value="{{ $unit->id }}">{{ $unit->name }}@unless ($unit->active) (desativada)@endunless</option>
@@ -46,7 +46,16 @@
                     </x-ui.select>
                     <x-input-error :messages="$errors->get('unitId')" />
                 </div>
-                <div class="flex items-end">
+                <div>
+                    <x-ui.select label="Setor" name="desk_sector_id" id="desk_sector_id" wire:model="sectorId" required :disabled="$unitId === null">
+                        <option value="">{{ $unitId === null ? 'Selecione a unidade' : 'Selecione' }}</option>
+                        @foreach ($this->availableSectors as $sector)
+                            <option value="{{ $sector->id }}">{{ $sector->name }}@unless ($sector->active) (inativo)@endunless</option>
+                        @endforeach
+                    </x-ui.select>
+                    <x-input-error :messages="$errors->get('sectorId')" />
+                </div>
+                <div class="flex items-end md:col-span-2">
                     <label class="flex min-h-11 items-center gap-3 text-sm text-text">
                         <input type="checkbox" wire:model="active" class="size-4 rounded border-border text-accent">
                         Ativo
@@ -80,6 +89,7 @@
                             <th scope="col" class="px-3 py-3 font-semibold">Nome</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Código</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Unidade</th>
+                            <th scope="col" class="px-3 py-3 font-semibold">Setor</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Status</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Ações</th>
                         </tr>
@@ -90,6 +100,7 @@
                                 <td class="px-3 py-3 font-medium text-text">{{ $desk->name }}</td>
                                 <td class="px-3 py-3 text-text-muted">{{ $desk->code }}</td>
                                 <td class="px-3 py-3 text-text-muted">{{ $desk->unit?->name ?? '—' }}</td>
+                                <td class="px-3 py-3 text-text-muted">{{ $desk->sector?->name ?? '—' }}</td>
                                 <td class="px-3 py-3">
                                     @if ($desk->active)
                                         <x-ui.badge tone="success">Ativo</x-ui.badge>

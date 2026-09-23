@@ -37,12 +37,44 @@ class DisplayPanel extends Model
         return $this->belongsTo(Unit::class);
     }
 
+    public function sectors(): BelongsToMany
+    {
+        return $this->belongsToMany(Sector::class, 'display_panel_sector')
+            ->withPivot(['id', 'clinic_id'])
+            ->withTimestamps();
+    }
+
     public function mediaItems(): BelongsToMany
     {
         return $this->belongsToMany(MediaItem::class, 'display_panel_media')
             ->withPivot(['id', 'clinic_id', 'position', 'duration_seconds', 'active'])
             ->withTimestamps()
             ->orderByPivot('position');
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function sectorIds(): array
+    {
+        if ($this->relationLoaded('sectors')) {
+            return $this->sectors->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        }
+
+        return $this->sectors()->pluck('sectors.id')->map(fn ($id): int => (int) $id)->all();
+    }
+
+    /**
+     * Operational primary sector for this panel (UI rule: one sector per panel).
+     * Legacy multi-sector rows still return the first linked sector.
+     */
+    public function primarySector(): ?Sector
+    {
+        if ($this->relationLoaded('sectors')) {
+            return $this->sectors->first();
+        }
+
+        return $this->sectors()->orderBy('sectors.id')->first();
     }
 
     public static function generatePublicToken(): string

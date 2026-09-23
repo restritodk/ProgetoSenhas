@@ -6,7 +6,10 @@ use App\Actions\CreateTicketType;
 use App\Actions\EnsureDefaultTicketTypes;
 use App\Livewire\TicketTypesManager;
 use App\Models\Clinic;
+use App\Models\Ticket;
 use App\Models\TicketType;
+use App\Models\Unit;
+use App\Models\UnitTicketType;
 use App\Models\User;
 use App\UserRole;
 use Database\Seeders\AdminSeeder;
@@ -27,7 +30,7 @@ class TicketTypeManagementTest extends TestCase
             ->get(route('ticket-types.index'))
             ->assertOk()
             ->assertSee('Tipos de Senha')
-            ->assertSee('Novo tipo');
+            ->assertSee('Novo tipo de senha');
 
         $this->assertTrue($admin->can('viewAny', TicketType::class));
         $this->assertTrue($admin->can('create', TicketType::class));
@@ -42,7 +45,12 @@ class TicketTypeManagementTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('ticket-types.index'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('ticket-types.index'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
 
         Livewire::actingAs($user)
             ->test(TicketTypesManager::class)
@@ -175,7 +183,12 @@ class TicketTypeManagementTest extends TestCase
 
         Livewire::actingAs($admin)
             ->test(TicketTypesManager::class)
-            ->call('activate', $foreignType->id)
+            ->call('confirmActivation', $foreignType->id)
+            ->assertNotFound();
+
+        Livewire::actingAs($admin)
+            ->test(TicketTypesManager::class)
+            ->call('confirmDeletion', $foreignType->id)
             ->assertNotFound();
 
         $this->assertTrue($admin->can('update', $ownType));
@@ -201,7 +214,7 @@ class TicketTypeManagementTest extends TestCase
             ->set('priority', '12')
             ->call('save')
             ->assertHasNoErrors()
-            ->assertSee('Tipo de senha atualizado com sucesso.');
+            ->assertSee('Alterações salvas com sucesso.');
 
         $this->assertDatabaseHas('ticket_types', [
             'id' => $ticketType->id,
@@ -215,16 +228,82 @@ class TicketTypeManagementTest extends TestCase
             ->test(TicketTypesManager::class)
             ->call('confirmDeactivation', $ticketType->id)
             ->call('deactivate')
-            ->assertSee('Tipo de senha desativado.');
+            ->assertSee('Tipo de senha desativado com sucesso.');
 
         $this->assertFalse($ticketType->fresh()->active);
 
         Livewire::actingAs($admin)
             ->test(TicketTypesManager::class)
-            ->call('activate', $ticketType->id)
-            ->assertSee('Tipo de senha ativado.');
+            ->call('confirmActivation', $ticketType->id)
+            ->call('activate')
+            ->assertSee('Tipo de senha ativado com sucesso.');
 
         $this->assertTrue($ticketType->fresh()->active);
+    }
+
+    public function test_unused_ticket_type_can_be_deleted_and_used_type_is_blocked(): void
+    {
+        $clinic = Clinic::factory()->create();
+        $admin = $this->administrator($clinic);
+        $unused = TicketType::factory()->create([
+            'clinic_id' => $clinic->id,
+            'name' => 'Exames',
+            'prefix' => 'X',
+            'priority' => 12,
+        ]);
+        $used = TicketType::factory()->create([
+            'clinic_id' => $clinic->id,
+            'name' => 'Normal',
+            'prefix' => 'N',
+            'priority' => 10,
+        ]);
+        $unit = Unit::factory()->for($clinic)->create();
+        Ticket::factory()->create([
+            'clinic_id' => $clinic->id,
+            'unit_id' => $unit->id,
+            'ticket_type_id' => $used->id,
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(TicketTypesManager::class)
+            ->call('confirmDeletion', $unused->id)
+            ->assertSet('ticketTypePendingDeletionId', $unused->id)
+            ->call('delete')
+            ->assertSee('Tipo de senha excluído com sucesso.');
+
+        $this->assertDatabaseMissing('ticket_types', ['id' => $unused->id]);
+
+        Livewire::actingAs($admin)
+            ->test(TicketTypesManager::class)
+            ->call('confirmDeletion', $used->id)
+            ->assertSet('showDeleteBlockedModal', true)
+            ->assertSet('ticketTypePendingDeletionId', null);
+
+        $this->assertDatabaseHas('ticket_types', ['id' => $used->id]);
+        $this->assertSame(1, Ticket::query()->where('ticket_type_id', $used->id)->count());
+    }
+
+    public function test_summary_and_filters_list_active_and_inactive(): void
+    {
+        $clinic = Clinic::factory()->create();
+        $admin = $this->administrator($clinic);
+        TicketType::factory()->create(['clinic_id' => $clinic->id, 'name' => 'Ativo A', 'prefix' => 'A', 'active' => true]);
+        TicketType::factory()->create(['clinic_id' => $clinic->id, 'name' => 'Inativo B', 'prefix' => 'B', 'active' => false]);
+
+        Livewire::actingAs($admin)
+            ->test(TicketTypesManager::class)
+            ->assertSee('Ativo A')
+            ->assertSee('Inativo B')
+            ->set('statusFilter', 'active')
+            ->assertSee('Ativo A')
+            ->assertDontSee('Inativo B')
+            ->set('statusFilter', 'inactive')
+            ->assertSee('Inativo B')
+            ->assertDontSee('Ativo A')
+            ->set('statusFilter', '')
+            ->set('search', 'Inativo')
+            ->assertSee('Inativo B')
+            ->assertDontSee('Ativo A');
     }
 
     public function test_priority_must_be_a_positive_integer(): void
@@ -295,6 +374,13 @@ class TicketTypeManagementTest extends TestCase
             'prefix' => 'E',
             'priority' => 30,
         ]);
+
+        $unit = Unit::query()->where('clinic_id', $admin->clinic_id)->firstOrFail();
+        $this->assertSame(3, UnitTicketType::query()
+            ->where('clinic_id', $admin->clinic_id)
+            ->where('unit_id', $unit->id)
+            ->where('active', true)
+            ->count());
     }
 
     public function test_clinic_and_prefix_are_not_mass_assignable_for_tenant_escape(): void

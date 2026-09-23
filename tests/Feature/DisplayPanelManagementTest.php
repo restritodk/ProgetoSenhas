@@ -50,6 +50,7 @@ class DisplayPanelManagementTest extends TestCase
         $this->assertSame($clinicA->id, $panel->clinic_id);
         $this->assertSame($unitA->id, $panel->unit_id);
         $this->assertSame('TV-REC', $panel->code);
+        $this->assertCount(1, $panel->sectors);
         $this->assertSame(64, strlen($panel->public_token));
         $this->assertDoesNotMatchRegularExpression('/^\d+$/', $panel->public_token);
         $this->assertNotSame((string) $clinicA->id, $panel->public_token);
@@ -83,7 +84,12 @@ class DisplayPanelManagementTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('display-panels.index'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('display-panels.index'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
 
         Livewire::actingAs($user)
             ->test(DisplayPanelsManager::class)

@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Unit extends Model
 {
@@ -34,6 +35,11 @@ class Unit extends Model
         return $this->hasMany(Desk::class);
     }
 
+    public function sectors(): HasMany
+    {
+        return $this->hasMany(Sector::class);
+    }
+
     public function tickets(): HasMany
     {
         return $this->hasMany(Ticket::class);
@@ -47,6 +53,11 @@ class Unit extends Model
     public function unitTicketTypes(): HasMany
     {
         return $this->hasMany(UnitTicketType::class);
+    }
+
+    public function queuePolicy(): HasOne
+    {
+        return $this->hasOne(UnitQueuePolicy::class);
     }
 
     public function ticketTypes(): BelongsToMany

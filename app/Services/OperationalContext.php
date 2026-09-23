@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Clinic;
 use App\Models\Desk;
 use App\Models\DeskAssignment;
+use App\Models\Sector;
 use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Contracts\Session\Session;
@@ -70,12 +71,25 @@ class OperationalContext
             return null;
         }
 
-        $desk = Desk::query()->find($deskId);
+        $desk = Desk::query()->with('sector')->find($deskId);
 
         if (
             ! $desk?->active
             || $desk->clinic_id !== $user->clinic_id
             || $desk->unit_id !== $unit->id
+        ) {
+            $session->forget(self::DESK_SESSION_KEY);
+
+            return null;
+        }
+
+        if (
+            $desk->sector_id !== null
+            && (
+                $desk->sector === null
+                || (int) $desk->sector->unit_id !== (int) $unit->id
+                || (int) $desk->sector->clinic_id !== (int) $user->clinic_id
+            )
         ) {
             $session->forget(self::DESK_SESSION_KEY);
 
@@ -96,6 +110,35 @@ class OperationalContext
         $assignment->forceFill(['last_seen_at' => now()])->save();
 
         return $desk;
+    }
+
+    /**
+     * Sector is derived from the active desk — never from a client-supplied sector_id.
+     */
+    public function activeSector(User $user, Session|SessionManager|Store $session): ?Sector
+    {
+        $desk = $this->activeDesk($user, $session);
+
+        if ($desk === null) {
+            return null;
+        }
+
+        $desk->loadMissing('sector');
+
+        $sector = $desk->sector;
+
+        if ($sector === null || ! $sector->active) {
+            return null;
+        }
+
+        if (
+            (int) $sector->clinic_id !== (int) $user->clinic_id
+            || (int) $sector->unit_id !== (int) $desk->unit_id
+        ) {
+            return null;
+        }
+
+        return $sector;
     }
 
     public function setActiveDesk(User $user, Desk $desk, Session|SessionManager|Store $session): bool

@@ -24,7 +24,11 @@ class DisplayPanelFeed
         }
 
         return DisplayPanel::query()
-            ->with(['clinic:id,name,active', 'unit:id,clinic_id,name,active'])
+            ->with([
+                'clinic:id,name,active',
+                'unit:id,clinic_id,name,active',
+                'sectors:id,clinic_id,unit_id,name,active',
+            ])
             ->where('public_token', $publicToken)
             ->first();
     }
@@ -36,7 +40,11 @@ class DisplayPanelFeed
      */
     public function build(DisplayPanel $panel): array
     {
-        $panel->loadMissing(['clinic:id,name,active', 'unit:id,clinic_id,name,active']);
+        $panel->loadMissing([
+            'clinic:id,name,active',
+            'unit:id,clinic_id,name,active',
+            'sectors:id,clinic_id,unit_id,name,active',
+        ]);
 
         $presentation = $panel->clinic !== null
             ? TvPresentation::forClinic($panel->clinic, $this->clinicSettings, $this->clinicBranding)->toArray()
@@ -120,6 +128,8 @@ class DisplayPanelFeed
      */
     private function recentCalls(DisplayPanel $panel, int $limit): Collection
     {
+        $sectorIds = $panel->sectorIds();
+
         return TicketCall::query()
             ->with([
                 'ticket.ticketType:id,name,prefix',
@@ -127,6 +137,11 @@ class DisplayPanelFeed
             ])
             ->where('clinic_id', $panel->clinic_id)
             ->where('unit_id', $panel->unit_id)
+            ->when(
+                $sectorIds !== [],
+                fn ($query) => $query->whereIn('sector_id', $sectorIds),
+                // Sem setores vinculados (legado): mantém escopo da unidade.
+            )
             ->orderByDesc('called_at')
             ->orderByDesc('id')
             ->limit($limit)

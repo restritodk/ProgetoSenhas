@@ -46,6 +46,11 @@ class Kiosk extends Model
         return $this->belongsTo(Unit::class);
     }
 
+    public function sector(): BelongsTo
+    {
+        return $this->belongsTo(Sector::class);
+    }
+
     public function tickets(): HasMany
     {
         return $this->hasMany(Ticket::class);

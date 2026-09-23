@@ -28,6 +28,11 @@ class TicketCall extends Model
         return $this->belongsTo(Unit::class);
     }
 
+    public function sector(): BelongsTo
+    {
+        return $this->belongsTo(Sector::class);
+    }
+
     public function ticket(): BelongsTo
     {
         return $this->belongsTo(Ticket::class);

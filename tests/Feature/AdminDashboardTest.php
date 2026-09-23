@@ -41,8 +41,17 @@ class AdminDashboardTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('dashboard'))->assertOk();
-        $this->actingAs($user)->get(route('clinic.show'))->assertForbidden();
+        $dashboard = $this->actingAs($user)->get(route('dashboard'));
+        $clinicShow = $this->actingAs($user)->get(route('clinic.show'));
+
+        if ($role === UserRole::ATTENDANT) {
+            $dashboard->assertRedirect(route('attendant.panel'));
+            $clinicShow->assertRedirect(route('attendant.panel'));
+        } else {
+            $dashboard->assertOk();
+            $clinicShow->assertForbidden();
+        }
+
         $this->assertFalse($user->can('manage', $clinic));
         $this->assertFalse($user->can('update', $clinic));
     }

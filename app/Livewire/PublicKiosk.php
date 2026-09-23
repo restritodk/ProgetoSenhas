@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Actions\IssueTicket;
 use App\Models\Kiosk;
+use App\Models\SectorTicketType;
 use App\Models\UnitTicketType;
 use App\Services\ClinicBranding;
 use App\Services\ClinicSettings;
@@ -103,11 +104,21 @@ class PublicKiosk extends Component
                 request()->ip(),
             );
 
-            $offer = UnitTicketType::query()
-                ->where('clinic_id', $kiosk->clinic_id)
-                ->where('unit_id', $kiosk->unit_id)
-                ->where('ticket_type_id', $ticket->ticket_type_id)
-                ->first();
+            $offer = null;
+            if ($kiosk->sector_id !== null) {
+                $offer = SectorTicketType::query()
+                    ->where('clinic_id', $kiosk->clinic_id)
+                    ->where('sector_id', $kiosk->sector_id)
+                    ->where('ticket_type_id', $ticket->ticket_type_id)
+                    ->first();
+            }
+            if ($offer === null) {
+                $offer = UnitTicketType::query()
+                    ->where('clinic_id', $kiosk->clinic_id)
+                    ->where('unit_id', $kiosk->unit_id)
+                    ->where('ticket_type_id', $ticket->ticket_type_id)
+                    ->first();
+            }
 
             $typeLabel = $offer?->publicLabel() ?? ($ticket->ticketType?->name ?? 'Atendimento');
             $issuedAtLabel = $ticket->issued_at
@@ -127,6 +138,12 @@ class PublicKiosk extends Component
                 $clinicName = (string) ($kiosk->clinic?->name ?? config('app.name'));
             }
 
+            $unitName = (string) ($kiosk->unit?->name ?? '');
+            $sectorName = (string) ($kiosk->sector?->name ?? '');
+            if ($sectorName !== '') {
+                $unitName = $unitName !== '' ? $unitName.' · '.$sectorName : $sectorName;
+            }
+
             $this->printDispatch = $printGrants->grantPrintTicket(
                 $kiosk->fresh(),
                 KioskPrintPayload::jobIdForTicket((int) $ticket->id),
@@ -134,7 +151,7 @@ class PublicKiosk extends Component
                     displayCode: $ticket->display_code,
                     typeLabel: $typeLabel,
                     clinicName: $clinicName,
-                    unitName: (string) ($kiosk->unit?->name ?? ''),
+                    unitName: $unitName,
                     issuedAtLabel: $issuedAtLabel,
                     message: (string) ($bag['kiosk_issued_message'] ?? 'Aguarde sua senha ser chamada no painel.'),
                 ),
@@ -145,9 +162,13 @@ class PublicKiosk extends Component
             $message = collect($exception->errors())->flatten()->first() ?? 'Não foi possível emitir a senha.';
             $friendly = mb_strtolower((string) $message);
 
-            if (str_contains($friendly, 'indispon')) {
+            if (str_contains($friendly, 'totem') && str_contains($friendly, 'indispon')) {
                 $this->screen = 'unavailable';
                 $this->errorMessage = 'Totem temporariamente indisponível.';
+            } elseif (str_contains($friendly, 'acabou de ficar indisponível') || str_contains($friendly, 'escolha outra')) {
+                unset($this->offeredTypes);
+                $this->screen = 'home';
+                $this->errorMessage = 'Esta opção de atendimento acabou de ficar indisponível. Escolha outra opção.';
             } else {
                 $this->errorMessage = 'Não foi possível emitir sua senha. Tente novamente ou procure a recepção.';
             }
@@ -180,6 +201,14 @@ class PublicKiosk extends Component
 
     public function refreshAvailability(ClinicSettings $settings, ClinicBranding $branding): void
     {
+        // Never interrupt an issued ticket screen or an in-flight issue (poll is also gated in the view).
+        if ($this->screen === 'result' || $this->issuing) {
+            return;
+        }
+
+        // Force fresh reads so Totem reflects type offer / activation changes without full reload.
+        unset($this->kiosk, $this->offeredTypes);
+
         $kiosk = $this->kiosk;
 
         if ($kiosk === null) {
@@ -201,13 +230,17 @@ class PublicKiosk extends Component
     public function kiosk(): ?Kiosk
     {
         return Kiosk::query()
-            ->with(['clinic:id,name,active', 'unit:id,clinic_id,name,active'])
+            ->with([
+                'clinic:id,name,active',
+                'unit:id,clinic_id,name,active',
+                'sector:id,clinic_id,unit_id,name,active',
+            ])
             ->where('public_token', $this->publicToken)
             ->first();
     }
 
     /**
-     * @return Collection<int, UnitTicketType>
+     * @return Collection<int, UnitTicketType|SectorTicketType>
      */
     #[Computed]
     public function offeredTypes(): Collection
@@ -216,6 +249,22 @@ class PublicKiosk extends Component
 
         if ($kiosk === null || ! $kiosk->isOperationallyAvailable()) {
             return collect();
+        }
+
+        if ($kiosk->sector_id !== null) {
+            $sectorOffers = SectorTicketType::query()
+                ->with(['ticketType:id,clinic_id,name,prefix,priority,active'])
+                ->where('clinic_id', $kiosk->clinic_id)
+                ->where('sector_id', $kiosk->sector_id)
+                ->where('active', true)
+                ->whereHas('ticketType', fn ($query) => $query->where('active', true))
+                ->orderBy('position')
+                ->orderBy('id')
+                ->get();
+
+            if ($sectorOffers->isNotEmpty()) {
+                return $sectorOffers;
+            }
         }
 
         return UnitTicketType::query()

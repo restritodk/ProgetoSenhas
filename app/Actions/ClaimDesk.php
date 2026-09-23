@@ -44,7 +44,7 @@ class ClaimDesk
 
             if ($existing !== null && (int) $existing->user_id !== (int) $actor->id) {
                 throw ValidationException::withMessages([
-                    'deskId' => 'Esta mesa já está em uso por outro atendente.',
+                    'deskId' => 'Esta mesa acabou de ser ocupada por outro atendente. Selecione outra mesa disponível.',
                 ]);
             }
 

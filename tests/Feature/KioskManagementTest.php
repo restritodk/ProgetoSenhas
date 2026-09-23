@@ -81,7 +81,12 @@ class KioskManagementTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('kiosks.index'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('kiosks.index'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
 
         Livewire::actingAs($user)
             ->test(KiosksManager::class)

@@ -6,6 +6,7 @@ use App\Actions\SyncUnitTicketTypes;
 use App\Livewire\PublicKiosk;
 use App\Models\Clinic;
 use App\Models\Kiosk;
+use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\Unit;
 use App\Models\User;
@@ -79,6 +80,82 @@ class PublicKioskTest extends TestCase
             ->assertSee('Atendimento Normal');
     }
 
+    public function test_emergency_appears_only_when_unit_offer_is_active(): void
+    {
+        [$kiosk, $clinic, $unit, $admin, $types] = $this->readyKiosk();
+
+        $this->get(route('kiosk.panel', $kiosk->public_token))
+            ->assertDontSee('Emergencial');
+
+        app(SyncUnitTicketTypes::class)->handle($admin, $unit, [
+            [
+                'ticket_type_id' => $types['preferential']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Preferencial',
+                'position' => 10,
+            ],
+            [
+                'ticket_type_id' => $types['normal']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Normal',
+                'position' => 20,
+            ],
+            [
+                'ticket_type_id' => $types['emergency']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Emergencial',
+                'position' => 5,
+            ],
+        ]);
+
+        $this->get(route('kiosk.panel', $kiosk->public_token))
+            ->assertOk()
+            ->assertSee('Atendimento Emergencial')
+            ->assertSee('Atendimento Preferencial')
+            ->assertSee('Atendimento Normal')
+            ->assertSee('kiosk-cards--three', false);
+    }
+
+    public function test_custom_ticket_type_appears_without_hardcoded_prefix(): void
+    {
+        [$kiosk, $clinic, $unit, $admin, $types] = $this->readyKiosk();
+        $vaccination = $this->type($clinic, 'Vacinação', 'VAC', 15);
+
+        app(SyncUnitTicketTypes::class)->handle($admin, $unit, [
+            [
+                'ticket_type_id' => $vaccination->id,
+                'active' => true,
+                'display_name' => 'Vacinação',
+                'position' => 1,
+            ],
+            [
+                'ticket_type_id' => $types['preferential']->id,
+                'active' => false,
+                'display_name' => null,
+                'position' => 10,
+            ],
+            [
+                'ticket_type_id' => $types['normal']->id,
+                'active' => false,
+                'display_name' => null,
+                'position' => 20,
+            ],
+            [
+                'ticket_type_id' => $types['emergency']->id,
+                'active' => false,
+                'display_name' => null,
+                'position' => 30,
+            ],
+        ]);
+
+        $this->get(route('kiosk.panel', $kiosk->public_token))
+            ->assertOk()
+            ->assertSee('Vacinação')
+            ->assertSee('Toque para retirar sua senha de atendimento')
+            ->assertDontSee('Atendimento Preferencial')
+            ->assertSee('kiosk-cards--one', false);
+    }
+
     public function test_success_screen_and_finish_return_home(): void
     {
         [$kiosk, , , , $types] = $this->readyKiosk();
@@ -105,6 +182,99 @@ class PublicKioskTest extends TestCase
             ->call('clearError')
             ->assertSet('errorMessage', '')
             ->assertSee('Retire sua senha');
+    }
+
+    public function test_refresh_availability_reflects_offer_changes_in_realtime(): void
+    {
+        [$kiosk, $clinic, $unit, $admin, $types] = $this->readyKiosk();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->assertSee('Atendimento Normal')
+            ->assertDontSee('Atendimento Emergencial');
+
+        app(SyncUnitTicketTypes::class)->handle($admin, $unit, [
+            [
+                'ticket_type_id' => $types['preferential']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Preferencial',
+                'position' => 10,
+            ],
+            [
+                'ticket_type_id' => $types['normal']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Normal',
+                'position' => 20,
+            ],
+            [
+                'ticket_type_id' => $types['emergency']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Emergencial',
+                'position' => 5,
+            ],
+        ]);
+
+        $component->call('refreshAvailability')
+            ->assertSee('Atendimento Emergencial')
+            ->assertSee('Atendimento Normal');
+
+        $types['emergency']->forceFill(['active' => false])->save();
+
+        $component->call('refreshAvailability')
+            ->assertDontSee('Atendimento Emergencial')
+            ->assertSee('Atendimento Normal');
+    }
+
+    public function test_issue_rejects_type_that_became_ineligible_server_side(): void
+    {
+        [$kiosk, , $unit, $admin, $types] = $this->readyKiosk();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->assertSee('Atendimento Normal');
+
+        app(SyncUnitTicketTypes::class)->handle($admin, $unit, [
+            [
+                'ticket_type_id' => $types['preferential']->id,
+                'active' => true,
+                'display_name' => 'Atendimento Preferencial',
+                'position' => 10,
+            ],
+            [
+                'ticket_type_id' => $types['normal']->id,
+                'active' => false,
+                'display_name' => 'Atendimento Normal',
+                'position' => 20,
+            ],
+            [
+                'ticket_type_id' => $types['emergency']->id,
+                'active' => false,
+                'display_name' => null,
+                'position' => 30,
+            ],
+        ]);
+
+        $component->call('issue', $types['normal']->id)
+            ->assertSet('screen', 'home')
+            ->assertSet('issuedTicketId', null)
+            ->assertSee('Esta opção de atendimento acabou de ficar indisponível');
+
+        $this->assertSame(0, Ticket::query()->count());
+    }
+
+    public function test_polling_does_not_reset_result_screen_or_timer_state(): void
+    {
+        [$kiosk, , , , $types] = $this->readyKiosk();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $types['normal']->id)
+            ->assertSet('screen', 'result')
+            ->assertSet('issuedDisplayCode', 'N001');
+
+        $component->call('refreshAvailability')
+            ->assertSet('screen', 'result')
+            ->assertSet('issuedDisplayCode', 'N001')
+            ->assertSet('issuedTicketId', Ticket::query()->value('id'));
+
+        $this->assertSame(1, Ticket::query()->count());
     }
 
     public function test_premium_layout_markers_are_present(): void

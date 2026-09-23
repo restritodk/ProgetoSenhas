@@ -10,50 +10,44 @@ class KioskPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $this->canManageKiosks($user);
+        return $this->activeClinic($user) && $user->hasPermission('kiosks.view');
     }
 
     public function view(User $user, Kiosk $kiosk): bool
     {
-        return $this->sameActiveClinic($user, $kiosk->clinic_id) && $user->isAdministrator();
+        return $this->sameActiveClinic($user, $kiosk->clinic_id) && $user->hasPermission('kiosks.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->canManageKiosks($user);
+        return $this->activeClinic($user) && $user->hasPermission('kiosks.create');
     }
 
     public function update(User $user, Kiosk $kiosk): bool
     {
-        return $this->sameActiveClinic($user, $kiosk->clinic_id) && $user->isAdministrator();
+        return $this->sameActiveClinic($user, $kiosk->clinic_id)
+            && ($user->hasPermission('kiosks.update') || $user->hasPermission('kiosks.manage_status'));
     }
 
     public function delete(User $user, Kiosk $kiosk): bool
     {
-        return $this->update($user, $kiosk);
+        return $this->sameActiveClinic($user, $kiosk->clinic_id) && $user->hasPermission('kiosks.update');
     }
 
     public function regenerateToken(User $user, Kiosk $kiosk): bool
     {
-        return $this->update($user, $kiosk);
-    }
-
-    private function canManageKiosks(User $user): bool
-    {
-        return $user->active && $user->isAdministrator() && $this->hasActiveClinic($user);
+        return $this->sameActiveClinic($user, $kiosk->clinic_id) && $user->hasPermission('kiosks.regenerate_token');
     }
 
     private function sameActiveClinic(User $user, ?int $clinicId): bool
     {
-        return $user->active
-            && $user->clinic_id !== null
-            && $user->clinic_id === $clinicId
-            && $this->hasActiveClinic($user);
+        return $this->activeClinic($user) && $user->clinic_id === $clinicId;
     }
 
-    private function hasActiveClinic(User $user): bool
+    private function activeClinic(User $user): bool
     {
-        return $user->clinic_id !== null
+        return $user->active
+            && $user->clinic_id !== null
             && Clinic::query()->whereKey($user->clinic_id)->where('active', true)->exists();
     }
 }

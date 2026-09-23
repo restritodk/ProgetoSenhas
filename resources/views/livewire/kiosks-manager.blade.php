@@ -35,7 +35,7 @@
                     <x-input-error :messages="$errors->get('code')" />
                 </x-ui.input>
                 <div>
-                    <x-ui.select label="Unidade" name="kiosk_unit_id" id="kiosk_unit_id" wire:model="unitId" required>
+                    <x-ui.select label="Unidade" name="kiosk_unit_id" id="kiosk_unit_id" wire:model.live="unitId" required>
                         <option value="">Selecione</option>
                         @foreach ($this->availableUnits as $unit)
                             <option value="{{ $unit->id }}">{{ $unit->name }}@unless ($unit->active) (desativada)@endunless</option>
@@ -43,7 +43,16 @@
                     </x-ui.select>
                     <x-input-error :messages="$errors->get('unitId')" />
                 </div>
-                <div class="flex items-end">
+                <div>
+                    <x-ui.select label="Setor" name="kiosk_sector_id" id="kiosk_sector_id" wire:model="sectorId" required :disabled="$unitId === null">
+                        <option value="">{{ $unitId === null ? 'Selecione a unidade' : 'Selecione' }}</option>
+                        @foreach ($this->availableSectors as $sector)
+                            <option value="{{ $sector->id }}">{{ $sector->name }}@unless ($sector->active) (inativo)@endunless</option>
+                        @endforeach
+                    </x-ui.select>
+                    <x-input-error :messages="$errors->get('sectorId')" />
+                </div>
+                <div class="flex items-end md:col-span-2">
                     <label class="flex min-h-11 items-center gap-3 text-sm text-text">
                         <input type="checkbox" wire:model="active" class="size-4 rounded border-border text-accent">
                         Ativo
@@ -249,6 +258,7 @@
                             <th scope="col" class="px-3 py-3 font-semibold">Nome</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Código</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Unidade</th>
+                            <th scope="col" class="px-3 py-3 font-semibold">Setor</th>
                             <th scope="col" class="px-3 py-3 font-semibold">URL pública</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Status</th>
                             <th scope="col" class="px-3 py-3 font-semibold">Ações</th>
@@ -260,6 +270,7 @@
                                 <td class="px-3 py-3 font-medium text-text">{{ $kiosk->name }}</td>
                                 <td class="px-3 py-3 text-text-muted">{{ $kiosk->code }}</td>
                                 <td class="px-3 py-3 text-text-muted">{{ $kiosk->unit?->name ?? '—' }}</td>
+                                <td class="px-3 py-3 text-text-muted">{{ $kiosk->sector?->name ?? '—' }}</td>
                                 <td class="px-3 py-3">
                                     <div class="flex max-w-xs flex-col gap-2">
                                         <code class="truncate text-xs text-text-muted" title="{{ $kiosk->publicUrl() }}">{{ $kiosk->publicUrl() }}</code>

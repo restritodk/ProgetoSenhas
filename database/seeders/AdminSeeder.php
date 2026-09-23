@@ -2,7 +2,9 @@
 
 namespace Database\Seeders;
 
+use App\Actions\EnsureClinicRolePermissions;
 use App\Actions\EnsureDefaultTicketTypes;
+use App\Actions\EnsureDefaultUnitTicketOffers;
 use App\Models\Clinic;
 use App\Models\Unit;
 use App\Models\User;
@@ -41,6 +43,7 @@ class AdminSeeder extends Seeder
         );
 
         app(EnsureDefaultTicketTypes::class)->handle($clinic);
+        app(EnsureDefaultUnitTicketOffers::class)->handle($clinic, $unit);
 
         $user = User::query()->firstOrNew([
             'email' => Str::lower($email),
@@ -57,5 +60,7 @@ class AdminSeeder extends Seeder
         $user->units()->syncWithoutDetaching([
             $unit->id => ['clinic_id' => $clinic->id],
         ]);
+
+        app(EnsureClinicRolePermissions::class)->handle($clinic);
     }
 }

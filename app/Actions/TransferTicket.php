@@ -91,10 +91,13 @@ class TransferTicket
                 'status' => TicketStatus::WAITING,
                 'current_desk_id' => null,
                 'called_by_user_id' => null,
+                'started_by_user_id' => null,
                 'called_at' => null,
                 'service_started_at' => null,
                 'queued_at' => $transferredAt,
                 'target_desk_id' => $toDesk?->id,
+                // Desk transfer may move the ticket to another sector of the same unit.
+                'sector_id' => $toDesk?->sector_id ?? $locked->sector_id,
             ])->save();
 
             return $locked->refresh()->load(['ticketType', 'targetDesk', 'currentDesk']);

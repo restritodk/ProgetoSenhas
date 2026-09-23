@@ -310,20 +310,35 @@
                         Nenhum painel cadastrado nesta clínica. Cadastre em Painéis / TVs.
                     </p>
                 @else
-                    <div class="space-y-2 rounded-xl border border-border bg-background p-3">
-                        @foreach ($clinicPanels as $panel)
-                            <label class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-sm text-text hover:bg-surface">
-                                <input
-                                    type="checkbox"
-                                    value="{{ $panel->id }}"
-                                    wire:model.live="selectedPanelIds"
-                                    class="size-4 rounded border-border text-accent"
-                                >
-                                <span class="font-medium">{{ $panel->name }}</span>
-                                @unless ($panel->active)
-                                    <x-ui.badge tone="warning">Inativo</x-ui.badge>
-                                @endunless
-                            </label>
+                    <div class="space-y-4 rounded-xl border border-border bg-background p-3">
+                        @foreach ($clinicPanelsGroupedByUnit as $unitName => $panelsInUnit)
+                            <div wire:key="media-unit-{{ md5((string) $unitName) }}">
+                                <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">{{ $unitName }}</p>
+                                <div class="space-y-1">
+                                    @foreach ($panelsInUnit as $panel)
+                                        @php
+                                            $sectorName = $panel->sectors->first()?->name;
+                                        @endphp
+                                        <label class="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg px-2 py-1.5 text-sm text-text hover:bg-surface">
+                                            <input
+                                                type="checkbox"
+                                                value="{{ $panel->id }}"
+                                                wire:model.live="selectedPanelIds"
+                                                class="mt-1 size-4 rounded border-border text-accent"
+                                            >
+                                            <span class="min-w-0">
+                                                <span class="block font-medium">{{ $panel->name }}</span>
+                                                <span class="block text-xs text-text-muted">
+                                                    Setor: {{ $sectorName ?: '—' }}
+                                                    @unless ($panel->active)
+                                                        · Inativo
+                                                    @endunless
+                                                </span>
+                                            </span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            </div>
                         @endforeach
                     </div>
                 @endif

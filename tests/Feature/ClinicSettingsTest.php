@@ -39,9 +39,13 @@ class ClinicSettingsTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)
-            ->get(route('settings.index'))
-            ->assertForbidden();
+        $response = $this->actingAs($user)->get(route('settings.index'));
+
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
     }
 
     public function test_defaults_work_without_persisted_rows(): void

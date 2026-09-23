@@ -9,6 +9,7 @@ use App\Models\TicketCall;
 use App\Models\User;
 use App\Services\NextTicketSelector;
 use App\Services\OperationalContext;
+use App\Services\UnitQueuePolicyResolver;
 use App\TicketCallType;
 use App\TicketStatus;
 use Carbon\CarbonImmutable;
@@ -21,6 +22,7 @@ class CallNextTicket
     public function __construct(
         private OperationalContext $operationalContext,
         private NextTicketSelector $nextTicketSelector,
+        private UnitQueuePolicyResolver $policyResolver,
     ) {}
 
     public function handle(User $actor): ?Ticket
@@ -61,14 +63,23 @@ class CallNextTicket
                     $query->whereNull('target_desk_id')
                         ->orWhere('target_desk_id', $desk->id);
                 })
+                ->when($desk->sector_id !== null, function ($query) use ($desk): void {
+                    $query->where('sector_id', $desk->sector_id);
+                })
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
 
-            $ticket = $this->nextTicketSelector->rank(
-                $waiting,
-                CarbonImmutable::now(config('app.timezone')),
-            )->first();
+            $now = CarbonImmutable::now(config('app.timezone'));
+            $policy = $this->policyResolver->lockForUnit($unit);
+
+            if ($policy !== null) {
+                $progress = $this->policyResolver->lockProgress($policy);
+                $ticket = $this->nextTicketSelector->selectFromLocked($waiting, $policy, $progress, $now);
+            } else {
+                $ticket = $this->nextTicketSelector->rank($waiting, $now)->first();
+                $progress = null;
+            }
 
             if ($ticket === null) {
                 return null;
@@ -94,12 +105,17 @@ class CallNextTicket
             $call->forceFill([
                 'clinic_id' => $actor->clinic_id,
                 'unit_id' => $unit->id,
+                'sector_id' => $ticket->sector_id ?? $desk->sector_id,
                 'ticket_id' => $ticket->id,
                 'desk_id' => $desk->id,
                 'called_by_user_id' => $actor->id,
                 'call_type' => TicketCallType::INITIAL,
                 'called_at' => $calledAt,
             ])->save();
+
+            if ($policy !== null && $progress !== null) {
+                $this->policyResolver->recordCall($policy, $progress, $ticket);
+            }
 
             return $ticket->refresh()->load(['ticketType', 'currentDesk', 'calledBy']);
         });

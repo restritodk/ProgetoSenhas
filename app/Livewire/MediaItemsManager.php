@@ -308,9 +308,26 @@ class MediaItemsManager extends Component
     public function clinicPanels(): Collection
     {
         return DisplayPanel::query()
+            ->with([
+                'unit:id,name,clinic_id',
+                'sectors:id,name,unit_id,clinic_id',
+            ])
             ->where('clinic_id', auth()->user()?->clinic_id)
             ->orderBy('name')
-            ->get(['id', 'name', 'active']);
+            ->orderBy('id')
+            ->get(['id', 'name', 'active', 'unit_id', 'clinic_id']);
+    }
+
+    /**
+     * Painéis agrupados por unidade para seleção na mídia.
+     *
+     * @return Collection<int|string, Collection<int, DisplayPanel>>
+     */
+    public function clinicPanelsGroupedByUnit(): Collection
+    {
+        return $this->clinicPanels()
+            ->groupBy(fn (DisplayPanel $panel): string => (string) ($panel->unit?->name ?: 'Sem unidade'))
+            ->sortKeys();
     }
 
     /**
@@ -342,6 +359,7 @@ class MediaItemsManager extends Component
             'editingMedia' => $this->editingMedia(),
             'youtubePreview' => $this->youtubePreview(),
             'clinicPanels' => $this->clinicPanels(),
+            'clinicPanelsGroupedByUnit' => $this->clinicPanelsGroupedByUnit(),
             'phpUploadLimitLabel' => $this->phpUploadLimitLabel(),
         ]);
     }

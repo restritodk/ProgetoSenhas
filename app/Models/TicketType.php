@@ -44,4 +44,9 @@ class TicketType extends Model
     {
         return $this->hasMany(Ticket::class);
     }
+
+    public function unitTicketTypes(): HasMany
+    {
+        return $this->hasMany(UnitTicketType::class);
+    }
 }

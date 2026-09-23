@@ -6,7 +6,11 @@
         <x-ui.alert type="danger" class="mb-4">{{ $errorMessage }}</x-ui.alert>
     @endif
 
-    <x-ui.card title="Playlist do painel" description="{{ $this->panel->name }} · {{ $this->panel->unit?->name }}">
+    <x-ui.card title="Playlist do painel" description="{{ $this->panel->name }}">
+        <div class="mb-4 grid gap-1 text-sm text-text-muted sm:grid-cols-2">
+            <p><span class="font-medium text-text">Unidade:</span> {{ $this->panel->unit?->name ?? '—' }}</p>
+            <p><span class="font-medium text-text">Setor:</span> {{ $this->panel->sectors->first()?->name ?? '—' }}</p>
+        </div>
         <form wire:submit="add" class="mb-6 grid gap-3 rounded-xl border border-border bg-background p-4 md:grid-cols-[1fr_140px_auto]">
             <x-ui.select label="Mídia disponível" name="playlist_media" id="playlist_media" wire:model="mediaItemIdToAdd" required>
                 <option value="">Selecione</option>

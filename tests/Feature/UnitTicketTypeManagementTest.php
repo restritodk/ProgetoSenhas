@@ -130,7 +130,7 @@ class UnitTicketTypeManagementTest extends TestCase
 
         $this->actingAs($attendant)
             ->get(route('unit-ticket-types.index'))
-            ->assertForbidden();
+            ->assertRedirect(route('attendant.panel'));
     }
 
     private function administrator(Clinic $clinic): User

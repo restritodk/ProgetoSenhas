@@ -274,7 +274,12 @@ class MediaItemManagementTest extends TestCase
             'role' => $role,
         ]);
 
-        $this->actingAs($user)->get(route('media-items.index'))->assertForbidden();
+        $response = $this->actingAs($user)->get(route('media-items.index'));
+        if ($role === UserRole::ATTENDANT) {
+            $response->assertRedirect(route('attendant.panel'));
+        } else {
+            $response->assertForbidden();
+        }
         $this->assertFalse($user->can('create', MediaItem::class));
     }
 

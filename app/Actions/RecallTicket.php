@@ -53,6 +53,7 @@ class RecallTicket
             $call->forceFill([
                 'clinic_id' => $actor->clinic_id,
                 'unit_id' => $unit->id,
+                'sector_id' => $locked->sector_id ?? $desk->sector_id,
                 'ticket_id' => $locked->id,
                 'desk_id' => $desk->id,
                 'called_by_user_id' => $actor->id,

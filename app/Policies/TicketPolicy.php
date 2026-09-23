@@ -10,23 +10,24 @@ class TicketPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $this->canManageTickets($user);
+        return $this->activeClinic($user)
+            && ($user->hasPermission('tickets.issue') || $user->hasPermission('attendant.access'));
     }
 
     public function view(User $user, Ticket $ticket): bool
     {
         return $this->sameActiveClinic($user, $ticket->clinic_id)
-            && ($user->isAdministrator() || $user->canAccessAttendantPanel());
+            && ($user->hasPermission('tickets.issue') || $user->hasPermission('attendant.access'));
     }
 
     public function create(User $user): bool
     {
-        return $this->canManageTickets($user);
+        return $this->activeClinic($user) && $user->hasPermission('tickets.issue');
     }
 
     public function update(User $user, Ticket $ticket): bool
     {
-        return $this->sameActiveClinic($user, $ticket->clinic_id) && $user->isAdministrator();
+        return $this->sameActiveClinic($user, $ticket->clinic_id) && $user->hasPermission('tickets.issue');
     }
 
     public function delete(User $user, Ticket $ticket): bool
@@ -36,60 +37,48 @@ class TicketPolicy
 
     public function call(User $user): bool
     {
-        return $this->canOperateTickets($user);
+        return $this->activeClinic($user) && $user->hasPermission('tickets.call');
     }
 
     public function recall(User $user, Ticket $ticket): bool
     {
-        return $this->canOperateTicket($user, $ticket);
+        return $this->canOperateTicket($user, $ticket, 'tickets.recall');
     }
 
     public function startService(User $user, Ticket $ticket): bool
     {
-        return $this->canOperateTicket($user, $ticket);
+        return $this->canOperateTicket($user, $ticket, 'tickets.start');
     }
 
     public function complete(User $user, Ticket $ticket): bool
     {
-        return $this->canOperateTicket($user, $ticket);
+        return $this->canOperateTicket($user, $ticket, 'tickets.complete');
     }
 
     public function markNoShow(User $user, Ticket $ticket): bool
     {
-        return $this->canOperateTicket($user, $ticket);
+        return $this->canOperateTicket($user, $ticket, 'tickets.no_show');
     }
 
     public function transfer(User $user, Ticket $ticket): bool
     {
-        return $this->canOperateTicket($user, $ticket);
+        return $this->canOperateTicket($user, $ticket, 'tickets.transfer');
     }
 
-    private function canManageTickets(User $user): bool
+    private function canOperateTicket(User $user, Ticket $ticket, string $permission): bool
     {
-        return $user->active && $user->isAdministrator() && $this->hasActiveClinic($user);
-    }
-
-    private function canOperateTickets(User $user): bool
-    {
-        return $user->canAccessAttendantPanel() && $this->hasActiveClinic($user);
-    }
-
-    private function canOperateTicket(User $user, Ticket $ticket): bool
-    {
-        return $this->canOperateTickets($user) && $this->sameActiveClinic($user, $ticket->clinic_id);
+        return $this->sameActiveClinic($user, $ticket->clinic_id) && $user->hasPermission($permission);
     }
 
     private function sameActiveClinic(User $user, ?int $clinicId): bool
     {
-        return $user->active
-            && $user->clinic_id !== null
-            && $user->clinic_id === $clinicId
-            && $this->hasActiveClinic($user);
+        return $this->activeClinic($user) && $user->clinic_id === $clinicId;
     }
 
-    private function hasActiveClinic(User $user): bool
+    private function activeClinic(User $user): bool
     {
-        return $user->clinic_id !== null
+        return $user->active
+            && $user->clinic_id !== null
             && Clinic::query()->whereKey($user->clinic_id)->where('active', true)->exists();
     }
 }

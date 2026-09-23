@@ -18,7 +18,8 @@ class KioskOfferPresentationTest extends TestCase
         $this->assertSame(KioskOfferPresentation::VARIANT_STANDARD, KioskOfferPresentation::variant($this->offer('Atendimento Normal', 'Normal', 'N')));
 
         $this->assertStringContainsString('prioridades', KioskOfferPresentation::description($this->offer('Preferencial', 'Preferencial', 'P')));
-        $this->assertStringContainsString('gerais', KioskOfferPresentation::description($this->offer('Normal', 'Normal', 'N')));
+        $this->assertStringContainsString('retirar sua senha', KioskOfferPresentation::description($this->offer('Normal', 'Normal', 'N')));
+        $this->assertStringContainsString('retirar sua senha', KioskOfferPresentation::description($this->offer('Vacinação', 'Vacinação', 'V')));
         $this->assertTrue(KioskOfferPresentation::isEmphasized($this->offer('Preferencial', 'Preferencial', 'P')));
         $this->assertFalse(KioskOfferPresentation::isEmphasized($this->offer('Normal', 'Normal', 'N')));
     }
