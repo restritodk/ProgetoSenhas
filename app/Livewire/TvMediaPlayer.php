@@ -27,7 +27,13 @@ class TvMediaPlayer extends Component
 
     public function refreshPlaylist(DisplayPanelFeed $feed, DisplayPanelPlaylist $playlist): void
     {
+        $signatureBefore = $this->playlistSignature;
         $this->syncPlaylist($feed, $playlist);
+
+        // TicketCall polls run on TvDisplay; this poll only re-renders when the playlist really changes.
+        if ($this->playlistSignature === $signatureBefore) {
+            $this->skipRender();
+        }
     }
 
     public function render(): View

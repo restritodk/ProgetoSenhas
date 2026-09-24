@@ -195,13 +195,16 @@
                 lg:grid-cols-[minmax(0,1.9fr)_minmax(20rem,1fr)]
                 xl:grid-cols-[minmax(0,2fr)_minmax(22rem,1fr)]"
         >
-            {{-- MEDIA: nested player owns its DOM via wire:ignore inside the child component --}}
+            {{-- MEDIA: @island skips morph on TicketCall polls so Alpine/video/YouTube keep playing.
+                 Playlist updates stay on the nested TvMediaPlayer poll + window event. --}}
             <section class="relative min-h-0 overflow-hidden rounded-xl border-2 border-primary bg-primary shadow-sm max-md:order-3 sm:rounded-2xl sm:border-[3px] md:order-none">
-                <livewire:tv-media-player
-                    wire:key="tv-media-{{ $publicToken }}"
-                    :public-token="$publicToken"
-                    :clinic-name="$clinicName"
-                />
+                @island(name: 'tv-media')
+                    <livewire:tv-media-player
+                        wire:key="tv-media-{{ $publicToken }}"
+                        :public-token="$publicToken"
+                        :clinic-name="$clinicName"
+                    />
+                @endisland
             </section>
 
             {{-- CALLS COLUMN --}}

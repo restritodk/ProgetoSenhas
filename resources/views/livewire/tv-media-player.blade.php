@@ -1,8 +1,9 @@
 <div wire:poll.45s="refreshPlaylist" class="relative h-full w-full">
     {{--
-        Alpine owns the playback surface. wire:ignore prevents Livewire poll morph
-        from destroying <video>/YouTube while TicketCall/playlist polls run.
+        Alpine owns the playback surface. wire:ignore + TvDisplay @island(tv-media)
+        prevent TicketCall / feed morphs from destroying <video>/YouTube.
         Playlist changes arrive via tv-playlist-updated (only when signature changes).
+        TicketCall audio stays isolated: announcements do not pause, mute-duck, remount, or advance this player.
     --}}
     <div
         wire:ignore
@@ -88,7 +89,6 @@
             imageTimerStartedFor: null,
             playbackToken: 0,
             advancing: false,
-            callDucked: false,
             autoplayAudioBlocked: false,
             clinicLabel: @js($clinicName !== '' ? $clinicName : config('app.name')),
             get hasItems() {
@@ -108,7 +108,7 @@
             },
             get showAudioHint() {
                 const item = this.current;
-                if (!item || !item.play_with_audio || this.callDucked) {
+                if (!item || !item.play_with_audio) {
                     return false;
                 }
                 return this.autoplayAudioBlocked;
@@ -132,10 +132,10 @@
                 const target = item || this.current;
                 return !!(target && target.play_with_audio);
             },
-            // MEDIA AUDIO: driven only by play_with_audio + call ducking.
-            // Independent from the TV "Ativar som" button (CALL AUDIO).
+            // MEDIA AUDIO: driven only by play_with_audio.
+            // TicketCall / announcement audio is fully independent (no pause, mute-duck, or remount).
             shouldPlayWithAudio(item = null) {
-                return this.itemWantsAudio(item) && !this.callDucked;
+                return this.itemWantsAudio(item);
             },
             playlistFingerprint(items) {
                 return JSON.stringify(Array.isArray(items) ? items : []);
@@ -730,17 +730,8 @@
                 });
             },
             init() {
-                // CALL AUDIO ducking only — "Ativar som" does not gate media audio.
-                this._onCallBegin = () => {
-                    this.callDucked = true;
-                    this.applyMediaAudio();
-                };
-                this._onCallEnd = () => {
-                    this.callDucked = false;
-                    this.applyMediaAudio();
-                };
-                window.addEventListener('tv-call-audio-begin', this._onCallBegin);
-                window.addEventListener('tv-call-audio-end', this._onCallEnd);
+                // TicketCall audio (bip / speech / EfeitoSonoroTV) stays isolated from this player:
+                // no pause, mute-duck, remount, or playlist advance on announcement events.
                 this.$nextTick(() => this.activateCurrent());
             },
         };
