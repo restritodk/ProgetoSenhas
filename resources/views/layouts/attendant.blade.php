@@ -81,7 +81,9 @@
                                 >
                                     <x-admin.icon :name="$item['icon']" class="size-5 shrink-0" />
                                     <span class="flex-1">{{ $item['label'] }}</span>
-                                    @if (($item['badge'] ?? null) !== null)
+                                    @if (($item['livewire_badge'] ?? null) === 'messages')
+                                        @livewire(\App\Livewire\AttendantMessagesBadge::class, key('attendant-messages-badge'))
+                                    @elseif (($item['badge'] ?? null) !== null)
                                         <span class="inline-flex min-w-5 items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[11px] font-bold text-white">
                                             {{ $item['badge'] > 99 ? '99+' : $item['badge'] }}
                                         </span>

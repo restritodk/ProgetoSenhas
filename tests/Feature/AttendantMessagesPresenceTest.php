@@ -2,19 +2,25 @@
 
 namespace Tests\Feature;
 
+use App\Actions\ClaimDesk;
 use App\Actions\EnsureClinicRolePermissions;
 use App\Actions\OpenDirectConversation;
 use App\Actions\SendClinicMessage;
 use App\Livewire\AttendantMessages;
+use App\Livewire\AttendantMessagesBadge;
 use App\Livewire\AttendantPresenceHeartbeat;
 use App\Models\Clinic;
 use App\Models\Conversation;
 use App\Models\ConversationParticipant;
+use App\Models\Desk;
+use App\Models\DeskAssignment;
 use App\Models\Message;
 use App\Models\Unit;
 use App\Models\User;
 use App\Services\ClinicMessageInbox;
+use App\Services\OperationalContext;
 use App\Services\UserPresence;
+use App\Support\DeskLease;
 use App\UserRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -260,31 +266,299 @@ class AttendantMessagesPresenceTest extends TestCase
         $this->assertSame($global, $byConversation);
     }
 
-    public function test_presence_online_offline_via_heartbeat_and_expiry(): void
+    public function test_attendant_without_desk_is_offline_claim_makes_online(): void
     {
         [$clinic, $actor, $peer] = $this->seedAttendants();
+        $unit = Unit::factory()->for($clinic)->create();
+        $desk = Desk::factory()->create([
+            'clinic_id' => $clinic->id,
+            'unit_id' => $unit->id,
+            'active' => true,
+        ]);
+        $peer->units()->attach($unit->id, ['clinic_id' => $clinic->id]);
         $presence = app(UserPresence::class);
 
         $this->assertFalse($presence->isOnline($peer));
+        $this->assertSame('Offline', $presence->statusLabel($peer));
 
-        Livewire::actingAs($peer)
-            ->test(AttendantPresenceHeartbeat::class)
-            ->call('beat');
+        $this->actingAs($peer);
+        app(OperationalContext::class)->setActiveUnit($peer, $unit, session());
+        app(ClaimDesk::class)->handle($peer, $desk);
 
         $this->assertTrue($presence->isOnline($peer->fresh()));
         $this->assertSame('Online', $presence->statusLabel($peer->fresh()));
 
-        $peer->forceFill([
-            'last_seen_at' => now()->subSeconds(UserPresence::ONLINE_WINDOW_SECONDS + 5),
-        ])->save();
-
-        $this->assertFalse($presence->isOnline($peer->fresh()));
-        $this->assertSame('Offline', $presence->statusLabel($peer->fresh()));
-
         Livewire::actingAs($actor)
             ->test(AttendantMessages::class)
             ->assertSee($peer->name)
-            ->assertSee('Offline');
+            ->assertSee('Online');
+    }
+
+    public function test_attendant_stays_online_across_panel_pages_while_desk_claimed(): void
+    {
+        [$clinic, $actor] = $this->seedAttendants();
+        $unit = Unit::factory()->for($clinic)->create();
+        $desk = Desk::factory()->create([
+            'clinic_id' => $clinic->id,
+            'unit_id' => $unit->id,
+            'active' => true,
+        ]);
+        $actor->units()->attach($unit->id, ['clinic_id' => $clinic->id]);
+        $presence = app(UserPresence::class);
+
+        $this->actingAs($actor);
+        app(OperationalContext::class)->setActiveUnit($actor, $unit, session());
+        app(ClaimDesk::class)->handle($actor, $desk);
+        $this->assertTrue($presence->isOnline($actor->fresh()));
+
+        foreach ([
+            'attendant.dashboard',
+            'attendant.panel',
+            'attendant.queue',
+            'attendant.history',
+            'attendant.messages',
+            'attendant.profile',
+        ] as $route) {
+            Livewire::actingAs($actor)
+                ->test(AttendantPresenceHeartbeat::class)
+                ->call('beat');
+
+            $this->actingAs($actor)->get(route($route))->assertOk();
+            $this->assertTrue(
+                $presence->isOnline($actor->fresh()),
+                "Expected Online after visiting {$route}",
+            );
+            $this->assertDatabaseHas('desk_assignments', [
+                'desk_id' => $desk->id,
+                'user_id' => $actor->id,
+            ]);
+        }
+    }
+
+    public function test_desk_lease_expiry_makes_attendant_offline_and_frees_desk(): void
+    {
+        [$clinic, $actor, $peer] = $this->seedAttendants();
+        $unit = Unit::factory()->for($clinic)->create();
+        $desk = Desk::factory()->create([
+            'clinic_id' => $clinic->id,
+            'unit_id' => $unit->id,
+            'active' => true,
+        ]);
+        $actor->units()->attach($unit->id, ['clinic_id' => $clinic->id]);
+        $peer->units()->attach($unit->id, ['clinic_id' => $clinic->id]);
+        $presence = app(UserPresence::class);
+
+        $this->freezeTime();
+        $this->actingAs($actor);
+        app(OperationalContext::class)->setActiveUnit($actor, $unit, session());
+        app(ClaimDesk::class)->handle($actor, $desk);
+        $this->assertTrue($presence->isOnline($actor->fresh()));
+
+        DeskAssignment::query()->where('user_id', $actor->id)->update([
+            'last_seen_at' => now()->subSeconds(DeskLease::ttlSeconds() + 5),
+        ]);
+
+        $this->assertFalse($presence->isOnline($actor->fresh()));
+        DeskLease::purgeExpired($desk->id);
+        $this->assertDatabaseMissing('desk_assignments', [
+            'desk_id' => $desk->id,
+            'user_id' => $actor->id,
+        ]);
+
+        $this->actingAs($peer);
+        session()->flush();
+        app(OperationalContext::class)->setActiveUnit($peer, $unit, session());
+        app(ClaimDesk::class)->handle($peer, $desk);
+        $this->assertDatabaseHas('desk_assignments', [
+            'desk_id' => $desk->id,
+            'user_id' => $peer->id,
+        ]);
+    }
+
+    public function test_supervisor_online_via_heartbeat_without_desk(): void
+    {
+        [$clinic] = $this->seedAttendants();
+        $supervisor = User::factory()->create([
+            'clinic_id' => $clinic->id,
+            'role' => UserRole::SUPERVISOR,
+            'name' => 'Supervisor Ana',
+        ]);
+        $presence = app(UserPresence::class);
+
+        $this->assertFalse($presence->isOnline($supervisor));
+        $this->assertDatabaseMissing('desk_assignments', ['user_id' => $supervisor->id]);
+
+        Livewire::actingAs($supervisor)
+            ->test(AttendantPresenceHeartbeat::class)
+            ->call('beat');
+
+        $this->assertTrue($presence->isOnline($supervisor->fresh()));
+
+        $supervisor->forceFill([
+            'last_seen_at' => now()->subSeconds($presence->onlineWindowSeconds() + 5),
+        ])->save();
+
+        $this->assertFalse($presence->isOnline($supervisor->fresh()));
+    }
+
+    public function test_received_messages_increment_unread_sent_do_not(): void
+    {
+        [, $actor, $peer] = $this->seedAttendants();
+        $conversation = app(OpenDirectConversation::class)->handle($actor, $peer);
+        $inbox = app(ClinicMessageInbox::class);
+
+        app(SendClinicMessage::class)->handle($peer, $conversation, 'um');
+        app(SendClinicMessage::class)->handle($peer, $conversation, 'dois');
+        $this->assertSame(2, $inbox->unreadCountFor($actor));
+        $this->assertSame(0, $inbox->unreadCountFor($peer));
+
+        app(SendClinicMessage::class)->handle($actor, $conversation, 'minha resposta');
+        // Sender cursor advances on send (conversation is open); own body never counts as unread.
+        $this->assertSame(0, $inbox->unreadCountFor($actor->fresh()));
+        $this->assertSame(1, $inbox->unreadCountFor($peer->fresh()));
+    }
+
+    public function test_opening_messages_without_conversation_keeps_unread(): void
+    {
+        [, $actor, $peer] = $this->seedAttendants();
+        $conversation = app(OpenDirectConversation::class)->handle($actor, $peer);
+        app(SendClinicMessage::class)->handle($peer, $conversation, 'A');
+        app(SendClinicMessage::class)->handle($peer, $conversation, 'B');
+
+        $this->assertSame(2, app(ClinicMessageInbox::class)->unreadCountFor($actor));
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->assertSet('activeConversationId', null);
+
+        $this->assertSame(2, app(ClinicMessageInbox::class)->unreadCountFor($actor->fresh()));
+    }
+
+    public function test_opening_one_conversation_marks_only_that_conversation_read(): void
+    {
+        [$clinic, $actor, $peer] = $this->seedAttendants();
+        $other = User::factory()->create([
+            'clinic_id' => $clinic->id,
+            'role' => UserRole::ATTENDANT,
+            'name' => 'Gabriella',
+        ]);
+
+        $withPeer = app(OpenDirectConversation::class)->handle($actor, $peer);
+        $withOther = app(OpenDirectConversation::class)->handle($actor, $other);
+
+        app(SendClinicMessage::class)->handle($peer, $withPeer, 'p1');
+        app(SendClinicMessage::class)->handle($peer, $withPeer, 'p2');
+        app(SendClinicMessage::class)->handle($other, $withOther, 'g1');
+        app(SendClinicMessage::class)->handle($other, $withOther, 'g2');
+        app(SendClinicMessage::class)->handle($other, $withOther, 'g3');
+
+        $inbox = app(ClinicMessageInbox::class);
+        $this->assertSame(5, $inbox->unreadCountFor($actor));
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->call('openConversation', $withPeer->id);
+
+        $this->assertSame(3, $inbox->unreadCountFor($actor->fresh()));
+        $byPeer = $inbox->unreadByPeerId($actor->fresh());
+        $this->assertSame(3, $byPeer->get($other->id));
+        $this->assertFalse($byPeer->has($peer->id));
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->call('openConversation', $withOther->id);
+
+        $this->assertSame(0, $inbox->unreadCountFor($actor->fresh()));
+    }
+
+    public function test_sidebar_badge_syncs_unread_from_backend(): void
+    {
+        [, $actor, $peer] = $this->seedAttendants();
+        $conversation = app(OpenDirectConversation::class)->handle($actor, $peer);
+        app(SendClinicMessage::class)->handle($peer, $conversation, 'badge');
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessagesBadge::class)
+            ->assertSet('count', 1)
+            ->call('sync')
+            ->assertSet('count', 1);
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->call('openConversation', $conversation->id);
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessagesBadge::class)
+            ->call('sync')
+            ->assertSet('count', 0);
+    }
+
+    public function test_presence_does_not_leak_across_clinics(): void
+    {
+        [, $actor] = $this->seedAttendants();
+        $otherClinic = Clinic::factory()->create();
+        app(EnsureClinicRolePermissions::class)->handle($otherClinic);
+        $foreignUnit = Unit::factory()->for($otherClinic)->create();
+        $foreignDesk = Desk::factory()->create([
+            'clinic_id' => $otherClinic->id,
+            'unit_id' => $foreignUnit->id,
+            'active' => true,
+        ]);
+        $foreign = User::factory()->create([
+            'clinic_id' => $otherClinic->id,
+            'role' => UserRole::ATTENDANT,
+            'name' => 'Foreign Peer',
+        ]);
+        $foreign->units()->attach($foreignUnit->id, ['clinic_id' => $otherClinic->id]);
+
+        $this->actingAs($foreign);
+        app(OperationalContext::class)->setActiveUnit($foreign, $foreignUnit, session());
+        app(ClaimDesk::class)->handle($foreign, $foreignDesk);
+
+        $peers = Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->instance()
+            ->directoryPeers;
+
+        $this->assertFalse($peers->contains(fn (array $row): bool => $row['user']->id === $foreign->id));
+        $this->assertTrue(app(UserPresence::class)->isOnline($foreign->fresh()));
+    }
+
+    public function test_composer_enter_handler_and_multiline_send(): void
+    {
+        [, $actor, $peer] = $this->seedAttendants();
+        $conversation = app(OpenDirectConversation::class)->handle($actor, $peer);
+
+        $html = Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->call('openConversation', $conversation->id)
+            ->html();
+
+        $this->assertStringContainsString('wire:keydown.enter.exact.prevent', $html);
+        $this->assertStringContainsString('wire:model.live="body"', $html);
+        $this->assertStringNotContainsString('x-on:keydown.enter', $html);
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->call('openConversation', $conversation->id)
+            ->set('body', "Linha 1\nLinha 2")
+            ->call('sendMessage')
+            ->assertSet('body', '');
+
+        $this->assertDatabaseHas('messages', [
+            'conversation_id' => $conversation->id,
+            'sender_id' => $actor->id,
+            'body' => "Linha 1\nLinha 2",
+        ]);
+
+        Livewire::actingAs($actor)
+            ->test(AttendantMessages::class)
+            ->call('openConversation', $conversation->id)
+            ->set('body', '   ')
+            ->call('sendMessage')
+            ->assertSet('body', '   ');
+
+        $this->assertSame(1, Message::query()->where('conversation_id', $conversation->id)->where('sender_id', $actor->id)->count());
     }
 
     public function test_click_opens_idempotent_conversation_and_exchanges_messages(): void
@@ -392,17 +666,30 @@ class AttendantMessagesPresenceTest extends TestCase
         );
     }
 
-    public function test_logout_marks_presence_offline(): void
+    public function test_logout_marks_presence_offline_and_releases_desk(): void
     {
-        [, $actor] = $this->seedAttendants();
-        app(UserPresence::class)->touch($actor);
-        $this->assertTrue(app(UserPresence::class)->isOnline($actor->fresh()));
+        [$clinic, $actor] = $this->seedAttendants();
+        $unit = Unit::factory()->for($clinic)->create();
+        $desk = Desk::factory()->create([
+            'clinic_id' => $clinic->id,
+            'unit_id' => $unit->id,
+            'active' => true,
+        ]);
+        $actor->units()->attach($unit->id, ['clinic_id' => $clinic->id]);
 
         $this->actingAs($actor);
+        app(OperationalContext::class)->setActiveUnit($actor, $unit, session());
+        app(ClaimDesk::class)->handle($actor, $desk);
+        $this->assertTrue(app(UserPresence::class)->isOnline($actor->fresh()));
+
         $this->assertLoggedOutFeedback($this->post(route('logout')));
 
         $this->assertNull($actor->fresh()->last_seen_at);
         $this->assertFalse(app(UserPresence::class)->isOnline($actor->fresh()));
+        $this->assertDatabaseMissing('desk_assignments', [
+            'desk_id' => $desk->id,
+            'user_id' => $actor->id,
+        ]);
     }
 
     public function test_polling_refresh_does_not_clear_composer_body(): void

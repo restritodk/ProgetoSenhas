@@ -41,9 +41,10 @@ class TvMediaCallIndependenceTest extends TestCase
 
         $this->assertStringContainsString('tvMediaPlayer', $html);
         $this->assertStringContainsString('wire:ignore', $html);
+        $this->assertStringContainsString('resumeCurrentPlayback', $html);
+        $this->assertStringContainsString('tv-call-audio-begin', $html);
+        $this->assertStringContainsString('tv-call-audio-end', $html);
         $this->assertStringNotContainsString('callDucked', $html);
-        $this->assertStringNotContainsString('tv-call-audio-begin', $html);
-        $this->assertStringNotContainsString('tv-call-audio-end', $html);
         $this->assertStringNotContainsString('pauseVideo', $html);
         $this->assertStringNotContainsString('stopVideo', $html);
         $this->assertStringNotContainsString('video.pause(', $html);

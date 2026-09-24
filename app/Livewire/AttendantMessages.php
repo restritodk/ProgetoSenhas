@@ -107,6 +107,7 @@ class AttendantMessages extends Component
             $this->errorMessage = '';
             $this->statusMessage = '';
             unset($this->directoryPeers, $this->conversations, $this->messages);
+            $this->js('queueMicrotask(() => document.getElementById("message_body")?.focus())');
         } catch (ValidationException $exception) {
             $this->errorMessage = collect($exception->errors())->flatten()->first() ?? 'Não foi possível enviar.';
         }
@@ -133,6 +134,7 @@ class AttendantMessages extends Component
             ->with([
                 'conversation.messages' => fn ($q) => $q->latest('id')->limit(1),
                 'conversation.participants.user:id,clinic_id,name,email,avatar_path,role,active,last_seen_at',
+                'conversation.participants.user.deskAssignment',
             ])
             ->where('clinic_id', $actor->clinic_id)
             ->where('user_id', $actor->id)
@@ -215,6 +217,7 @@ class AttendantMessages extends Component
         }
 
         return $query
+            ->with('deskAssignment')
             ->get(['id', 'clinic_id', 'name', 'email', 'avatar_path', 'role', 'active', 'last_seen_at'])
             ->map(fn (User $peer): array => [
                 'user' => $peer,
@@ -323,7 +326,7 @@ class AttendantMessages extends Component
         $user = auth()->user();
 
         return $conversation->participants()
-            ->with('user:id,name,email,avatar_path,role,active,last_seen_at,clinic_id')
+            ->with(['user:id,name,email,avatar_path,role,active,last_seen_at,clinic_id', 'user.deskAssignment'])
             ->where('user_id', '!=', $user?->id)
             ->where('clinic_id', $user?->clinic_id)
             ->first()
@@ -333,15 +336,20 @@ class AttendantMessages extends Component
     private function markRead(Conversation $conversation): void
     {
         $user = auth()->user();
+
+        if ($user === null) {
+            return;
+        }
+
         $maxMessageId = Message::query()
             ->where('conversation_id', $conversation->id)
-            ->where('clinic_id', $user?->clinic_id)
+            ->where('clinic_id', $user->clinic_id)
             ->max('id');
 
         ConversationParticipant::query()
             ->where('conversation_id', $conversation->id)
-            ->where('user_id', $user?->id)
-            ->where('clinic_id', $user?->clinic_id)
+            ->where('user_id', $user->id)
+            ->where('clinic_id', $user->clinic_id)
             ->update([
                 'last_read_at' => now(),
                 'last_read_message_id' => $maxMessageId,

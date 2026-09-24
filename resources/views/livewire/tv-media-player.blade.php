@@ -732,7 +732,85 @@
             init() {
                 // TicketCall audio (bip / speech / EfeitoSonoroTV) stays isolated from this player:
                 // no pause, mute-duck, remount, or playlist advance on announcement events.
+                // Browsers (esp. YouTube iframe) may still auto-pause when call audio starts —
+                // resume playback only; do not duck or pause ourselves.
+                this._onCallAudioBegin = () => {
+                    this.scheduleSoftResume(400);
+                    this.scheduleSoftResume(1200);
+                };
+                this._onCallAudioEnd = () => {
+                    this.resumeCurrentPlayback();
+                    this.scheduleSoftResume(300);
+                };
+                window.addEventListener('tv-call-audio-begin', this._onCallAudioBegin);
+                window.addEventListener('tv-call-audio-end', this._onCallAudioEnd);
                 this.$nextTick(() => this.activateCurrent());
+            },
+            destroy() {
+                if (this._onCallAudioBegin) {
+                    window.removeEventListener('tv-call-audio-begin', this._onCallAudioBegin);
+                }
+                if (this._onCallAudioEnd) {
+                    window.removeEventListener('tv-call-audio-end', this._onCallAudioEnd);
+                }
+                if (this._softResumeTimers) {
+                    this._softResumeTimers.forEach((id) => clearTimeout(id));
+                    this._softResumeTimers = [];
+                }
+            },
+            scheduleSoftResume(delayMs) {
+                if (!this._softResumeTimers) {
+                    this._softResumeTimers = [];
+                }
+                const id = setTimeout(() => {
+                    this.resumeCurrentPlayback();
+                }, delayMs);
+                this._softResumeTimers.push(id);
+            },
+            resumeCurrentPlayback() {
+                const item = this.current;
+                if (!item || this.advancing) {
+                    return;
+                }
+
+                if (item.type === 'video') {
+                    const video = this.$refs.localVideo;
+                    if (video && video.paused) {
+                        const start = video.play();
+                        if (start && typeof start.then === 'function') {
+                            start.catch(() => {}).finally(() => this.applyMediaAudio());
+                        } else {
+                            this.applyMediaAudio();
+                        }
+                    }
+                    return;
+                }
+
+                if (item.type === 'youtube') {
+                    if (!this.ytPlayer || this.ytMountedId !== item.id) {
+                        this.mountYouTube(item);
+                        return;
+                    }
+                    try {
+                        const YT = window.YT;
+                        const state = typeof this.ytPlayer.getPlayerState === 'function'
+                            ? this.ytPlayer.getPlayerState()
+                            : null;
+                        // -1 unstarted, 2 paused, 5 cued — resume without remount.
+                        if (
+                            state === null
+                            || state === -1
+                            || (YT && (state === YT.PlayerState.PAUSED || state === YT.PlayerState.CUED))
+                            || state === 2
+                            || state === 5
+                        ) {
+                            this.ytPlayer.playVideo();
+                        }
+                        this.applyMediaAudio();
+                    } catch (e) {
+                        this.mountYouTube(item);
+                    }
+                }
             },
         };
     }

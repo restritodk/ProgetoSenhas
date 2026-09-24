@@ -8,9 +8,9 @@ use App\Services\OperationalChatEligibility;
 final class AttendantNavigation
 {
     /**
-     * @return list<array{label: string, icon: string, route: string, badge: int|null}>
+     * @return list<array{label: string, icon: string, route: string, badge: int|null, livewire_badge?: string}>
      */
-    public static function items(User $user, int $unreadMessages = 0): array
+    public static function items(User $user): array
     {
         $items = [];
 
@@ -46,7 +46,10 @@ final class AttendantNavigation
                 'label' => 'Mensagens',
                 'icon' => 'message',
                 'route' => 'attendant.messages',
-                'badge' => $unreadMessages > 0 ? $unreadMessages : null,
+                // Badge is rendered by Livewire (AttendantMessagesBadge) so it
+                // stays fresh on every attendant page without a full reload.
+                'badge' => null,
+                'livewire_badge' => 'messages',
             ];
         }
 

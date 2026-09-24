@@ -1,5 +1,5 @@
 <div
-    wire:poll.{{ \App\Services\UserPresence::HEARTBEAT_SECONDS }}s="beat"
+    wire:poll.{{ app(\App\Services\UserPresence::class)->heartbeatSeconds() }}s="beat"
     class="hidden"
     aria-hidden="true"
 ></div>

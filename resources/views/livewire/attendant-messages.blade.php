@@ -228,13 +228,18 @@
                 @endforelse
             </div>
 
-            <form wire:submit="sendMessage" class="border-t border-border p-4" wire:key="composer-{{ $activeConversationId }}">
+            <form
+                wire:submit="sendMessage"
+                class="border-t border-border p-4"
+                wire:key="composer-{{ $activeConversationId }}"
+            >
                 <label for="message_body" class="sr-only">Mensagem</label>
                 @if ($this->canSendToPeer)
                     <div class="flex gap-2">
                         <textarea
                             id="message_body"
-                            wire:model="body"
+                            wire:model.live="body"
+                            wire:keydown.enter.exact.prevent="sendMessage"
                             rows="2"
                             maxlength="2000"
                             placeholder="Digite uma mensagem..."

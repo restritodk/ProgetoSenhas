@@ -13,7 +13,6 @@ use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\User;
 use App\Services\ClinicBranding;
-use App\Services\ClinicMessageInbox;
 use App\Services\ClinicSettings;
 use App\Services\OperationalContext;
 use App\Services\TvTts\EspeakNgSynthesizer;
@@ -134,16 +133,12 @@ class AppServiceProvider extends ServiceProvider
                 )->toArray()
                 : [];
 
-            $unread = $user
-                ? app(ClinicMessageInbox::class)->unreadCountFor($user)
-                : 0;
-
             $view->with([
                 'currentClinic' => $clinic,
                 'activeUnit' => $user ? $context->activeUnit($user, session()) : null,
                 'activeDesk' => $user ? $context->activeDesk($user, session()) : null,
                 'attendantBranding' => $branding,
-                'attendantNavItems' => $user ? AttendantNavigation::items($user, $unread) : [],
+                'attendantNavItems' => $user ? AttendantNavigation::items($user) : [],
                 'showAdminShortcut' => $user !== null
                     && ! $user->isAttendant()
                     && $user->hasPermission('dashboard.view'),

@@ -196,7 +196,8 @@
                 xl:grid-cols-[minmax(0,2fr)_minmax(22rem,1fr)]"
         >
             {{-- MEDIA: @island skips morph on TicketCall polls so Alpine/video/YouTube keep playing.
-                 Playlist updates stay on the nested TvMediaPlayer poll + window event. --}}
+                 Playlist updates stay on the nested TvMediaPlayer poll + window event.
+                 Call audio may auto-pause YouTube in the browser — player resumes on tv-call-audio-*. --}}
             <section class="relative min-h-0 overflow-hidden rounded-xl border-2 border-primary bg-primary shadow-sm max-md:order-3 sm:rounded-2xl sm:border-[3px] md:order-none">
                 @island(name: 'tv-media')
                     <livewire:tv-media-player
