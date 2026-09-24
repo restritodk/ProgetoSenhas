@@ -25,6 +25,7 @@ class KioskFactory extends Factory
             'public_code' => Kiosk::generatePublicCode(),
             'active' => true,
             'print_enabled' => false,
+            'print_method' => 'browser',
             'print_agent_port' => 17321,
             'print_agent_listen_mode' => 'local',
             'print_paper_width' => '80',

@@ -37,14 +37,130 @@
         ? array_values(array_filter(array_map('trim', preg_split('/[\n,]+/', mb_strtoupper($slogan)) ?: [])))
         : ['CUIDANDO', 'DE PESSOAS,', 'SEMPRE.'];
     $printDispatch = $printDispatch ?? null;
+    $browserPrintPayload = $browserPrintPayload ?? null;
+    $resultUnitLabel = $browserPrintPayload['unitName']
+        ?? (($unitName !== '' && ($kiosk?->sector?->name ?? '') !== '')
+            ? $unitName.' · '.$kiosk->sector->name
+            : $unitName);
 @endphp
 
 <div
     class="kiosk-shell"
     style="--color-primary: {{ $primaryColor }}; --color-accent: {{ $accentColor }}; --color-primary-dark: {{ $primaryColor }}; --color-on-primary: {{ $onPrimary }}; --kiosk-priority: #e8a317;"
     @if ($screen !== 'result' && ! $issuing) wire:poll.3s="refreshAvailability" @endif
+    x-data="{
+        extractPrintDetail(detail) {
+            const payload = detail || {}
+            return {
+                agentUrl: payload.agentUrl || (payload[0] && payload[0].agentUrl) || null,
+                grant: payload.grant || (payload[0] && payload[0].grant) || null,
+                signature: payload.signature || (payload[0] && payload[0].signature) || null,
+            }
+        },
+        extractBrowserDetail(detail) {
+            const payload = detail || {}
+            const first = payload[0] || {}
+            return {
+                clinicName: payload.clinicName || first.clinicName || '',
+                unitName: payload.unitName || first.unitName || '',
+                displayCode: payload.displayCode || first.displayCode || '',
+                typeLabel: payload.typeLabel || first.typeLabel || '',
+                issuedAtLabel: payload.issuedAtLabel || first.issuedAtLabel || '',
+                message: payload.message || first.message || '',
+                paperWidth: payload.paperWidth || first.paperWidth || '80',
+            }
+        },
+        fillBrowserReceipt(payload) {
+            const root = this.$refs.browserReceipt
+            if (!root || !payload) return
+            root.dataset.width = payload.paperWidth === '58' ? '58' : '80'
+            const set = (ref, value) => {
+                if (this.$refs[ref]) this.$refs[ref].textContent = value || ''
+            }
+            set('receiptClinic', payload.clinicName)
+            set('receiptUnit', payload.unitName)
+            set('receiptCode', payload.displayCode)
+            set('receiptType', payload.typeLabel)
+            set('receiptAt', payload.issuedAtLabel)
+            set('receiptMessage', payload.message)
+        },
+        runBrowserPrint(payload) {
+            if (!payload || !payload.displayCode) return false
+
+            window.__humanaBrowserPrintKeys = window.__humanaBrowserPrintKeys || {}
+            const key = String(payload.displayCode) + '|' + String(payload.issuedAtLabel || '')
+            if (window.__humanaBrowserPrintKeys[key]) {
+                return false
+            }
+            window.__humanaBrowserPrintKeys[key] = true
+
+            this.fillBrowserReceipt(payload)
+            window.print()
+
+            return true
+        },
+        sendPrint(payload) {
+            const agentUrl = payload?.agentUrl
+            const grant = payload?.grant
+            const signature = payload?.signature
+            if (!agentUrl || !grant || !signature) {
+                return
+            }
+
+            window.__humanaKioskPrintJobs = window.__humanaKioskPrintJobs || {}
+            const jobId = grant.jobId || ''
+            if (jobId && window.__humanaKioskPrintJobs[jobId]) {
+                return
+            }
+            if (jobId) {
+                window.__humanaKioskPrintJobs[jobId] = true
+            }
+
+            const maxAttempts = 2
+            const post = (attempt) => {
+                const controller = new AbortController()
+                const timeoutId = window.setTimeout(() => controller.abort(), 4000)
+                fetch(agentUrl + '/print/ticket', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ grant, signature }),
+                    signal: controller.signal,
+                })
+                    .then((response) => {
+                        if (!response.ok && attempt < maxAttempts) {
+                            post(attempt + 1)
+                        }
+                    })
+                    .catch(() => {
+                        if (attempt < maxAttempts) {
+                            post(attempt + 1)
+                        }
+                    })
+                    .finally(() => window.clearTimeout(timeoutId))
+            }
+            post(1)
+        }
+    }"
+    @kiosk-print-ticket.window="sendPrint(extractPrintDetail($event.detail))"
+    @kiosk-browser-print.window="runBrowserPrint(extractBrowserDetail($event.detail))"
 >
-    <div class="kiosk-main">
+    {{-- Comprovante dedicado: oculto na tela, único conteúdo em @media print --}}
+    <div
+        class="kiosk-print-receipt"
+        x-ref="browserReceipt"
+        data-width="{{ $browserPrintPayload['paperWidth'] ?? '80' }}"
+        aria-hidden="true"
+    >
+        <p class="kiosk-print-receipt__clinic" x-ref="receiptClinic">{{ $browserPrintPayload['clinicName'] ?? $clinicName }}</p>
+        <p class="kiosk-print-receipt__unit" x-ref="receiptUnit">{{ $browserPrintPayload['unitName'] ?? $resultUnitLabel }}</p>
+        <p class="kiosk-print-receipt__label">SENHA</p>
+        <p class="kiosk-print-receipt__code" x-ref="receiptCode">{{ $browserPrintPayload['displayCode'] ?? $issuedDisplayCode }}</p>
+        <p class="kiosk-print-receipt__type" x-ref="receiptType">{{ $browserPrintPayload['typeLabel'] ?? $issuedTypeLabel }}</p>
+        <p class="kiosk-print-receipt__at" x-ref="receiptAt">{{ $browserPrintPayload['issuedAtLabel'] ?? $issuedAtLabel }}</p>
+        <p class="kiosk-print-receipt__message" x-ref="receiptMessage">{{ $browserPrintPayload['message'] ?? $issuedMessage }}</p>
+    </div>
+
+    <div class="kiosk-main kiosk-no-print">
         <header class="kiosk-header">
             <div class="kiosk-header__side kiosk-header__side--left">
                 <p class="kiosk-quote" aria-hidden="true">
@@ -124,36 +240,47 @@
                     timerStarted: false,
                     printStarted: false,
                     returnMs: {{ (int) $autoReturnMs }},
-                    dispatch: @js($printDispatch),
+                    printPayload: @js($printDispatch),
+                    browserPayload: @js($browserPrintPayload),
                     init() {
-                        this.startTimer()
-                        this.startPrint()
+                        this.armAfterPrint()
+                        this.startPrintFlow()
+                    },
+                    armAfterPrint() {
+                        const onAfter = () => this.startTimer()
+                        window.addEventListener('afterprint', onAfter, { once: true })
                     },
                     startTimer() {
                         if (this.timerStarted) return
                         this.timerStarted = true
                         window.setTimeout(() => $wire.finish(), this.returnMs)
                     },
-                    async startPrint() {
+                    startPrintFlow() {
                         if (this.printStarted) return
                         this.printStarted = true
-                        const payload = this.dispatch
+
+                        if (this.browserPayload && this.browserPayload.displayCode) {
+                            // Ensure receipt DOM reflects the issued ticket, then window.print().
+                            // Chromium pauses timers while the dialog is open; afterprint is a fallback.
+                            window.requestAnimationFrame(() => {
+                                window.requestAnimationFrame(() => {
+                                    $dispatch('kiosk-browser-print', this.browserPayload)
+                                    $wire.clearBrowserPrintPayload()
+                                    this.startTimer()
+                                })
+                            })
+                            return
+                        }
+
+                        // Agent or no print: keep previous behaviour (timer + optional agent POST).
+                        this.startTimer()
+                        const payload = this.printPayload
                         if (!payload || !payload.agentUrl || !payload.grant || !payload.signature) {
                             $wire.clearPrintDispatch()
                             return
                         }
-                        try {
-                            await fetch(payload.agentUrl + '/print/ticket', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                                body: JSON.stringify({ grant: payload.grant, signature: payload.signature }),
-                                signal: AbortSignal.timeout(4000),
-                            })
-                        } catch (e) {
-                            // Agent offline/timeout must not affect the issued ticket.
-                        } finally {
-                            $wire.clearPrintDispatch()
-                        }
+                        $dispatch('kiosk-print-ticket', payload)
+                        $wire.clearPrintDispatch()
                     }
                 }"
             >
@@ -272,7 +399,7 @@
         @endif
     </div>
 
-    <footer class="kiosk-footer">
+    <footer class="kiosk-footer kiosk-no-print">
         <div class="kiosk-footer__waves" aria-hidden="true">
             <svg class="kiosk-footer__wave kiosk-footer__wave--back" viewBox="0 0 1440 90" preserveAspectRatio="none">
                 <path d="M0,40 C240,80 480,10 720,35 C960,60 1200,80 1440,30 L1440,90 L0,90 Z"></path>

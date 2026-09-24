@@ -62,7 +62,43 @@
                 @if ($editingKioskId)
                     <div
                         class="md:col-span-2 space-y-4 rounded-xl border border-border bg-surface p-4"
-                        x-data
+                        x-data="{
+                            extractBrowserDetail(detail) {
+                                const payload = detail || {}
+                                const first = payload[0] || {}
+                                return {
+                                    clinicName: payload.clinicName || first.clinicName || '',
+                                    unitName: payload.unitName || first.unitName || '',
+                                    displayCode: payload.displayCode || first.displayCode || '',
+                                    typeLabel: payload.typeLabel || first.typeLabel || '',
+                                    issuedAtLabel: payload.issuedAtLabel || first.issuedAtLabel || '',
+                                    message: payload.message || first.message || '',
+                                    paperWidth: payload.paperWidth || first.paperWidth || '80',
+                                }
+                            },
+                            runBrowserTestPrint(payload) {
+                                const root = this.$refs.adminBrowserReceipt
+                                if (!root || !payload?.displayCode) return
+                                root.dataset.width = payload.paperWidth === '58' ? '58' : '80'
+                                const map = {
+                                    adminReceiptClinic: payload.clinicName,
+                                    adminReceiptUnit: payload.unitName,
+                                    adminReceiptCode: payload.displayCode,
+                                    adminReceiptType: payload.typeLabel,
+                                    adminReceiptAt: payload.issuedAtLabel,
+                                    adminReceiptMessage: payload.message,
+                                }
+                                Object.entries(map).forEach(([ref, value]) => {
+                                    if (this.$refs[ref]) this.$refs[ref].textContent = value || ''
+                                })
+                                window.requestAnimationFrame(() => {
+                                    window.requestAnimationFrame(() => {
+                                        window.print()
+                                        $wire.clearBrowserTestPrintPayload()
+                                    })
+                                })
+                            }
+                        }"
                         @kiosk-agent-list-printers.window="
                             const detail = $event.detail || {}
                             const agentUrl = detail.agentUrl || (detail[0] && detail[0].agentUrl)
@@ -115,118 +151,170 @@
                                 })
                                 .catch(() => $wire.markAgentUnavailable())
                         "
+                        @kiosk-browser-test-print.window="runBrowserTestPrint(extractBrowserDetail($event.detail))"
                     >
-                        <h3 class="text-sm font-semibold text-text">Impressão</h3>
-                        <p class="text-xs text-text-muted">Configuração local deste Totem. O segredo do agente nunca é embutido na tela pública.</p>
+                        <div class="kiosk-print-receipt" x-ref="adminBrowserReceipt" data-width="80" aria-hidden="true">
+                            <p class="kiosk-print-receipt__clinic" x-ref="adminReceiptClinic"></p>
+                            <p class="kiosk-print-receipt__unit" x-ref="adminReceiptUnit"></p>
+                            <p class="kiosk-print-receipt__label">SENHA</p>
+                            <p class="kiosk-print-receipt__code" x-ref="adminReceiptCode"></p>
+                            <p class="kiosk-print-receipt__type" x-ref="adminReceiptType"></p>
+                            <p class="kiosk-print-receipt__at" x-ref="adminReceiptAt"></p>
+                            <p class="kiosk-print-receipt__message" x-ref="adminReceiptMessage"></p>
+                        </div>
 
-                        <label class="flex min-h-11 items-center gap-3 text-sm text-text">
-                            <input type="checkbox" wire:model="printEnabled" class="size-4 rounded border-border text-accent">
-                            Impressão automática ativada
-                        </label>
+                        <div class="kiosk-no-print space-y-4">
+                            <h3 class="text-sm font-semibold text-text">Impressão</h3>
+                            <p class="text-xs text-text-muted">Configure se o Totem imprime automaticamente após emitir a senha e qual tecnologia usar.</p>
 
-                        <div class="grid gap-3 md:grid-cols-2">
-                            <x-ui.select label="Modo do agente" name="print_agent_listen_mode" id="print_agent_listen_mode" wire:model.live="printAgentListenMode">
-                                <option value="local">Local (navegador na CPU Windows)</option>
-                                <option value="lan">LAN (tablet Android / outro dispositivo)</option>
+                            <label class="flex min-h-11 items-center gap-3 text-sm text-text">
+                                <input type="checkbox" wire:model="printEnabled" class="size-4 rounded border-border text-accent">
+                                Imprimir automaticamente ao emitir senha
+                            </label>
+
+                            <x-ui.select label="Modo de impressão" name="print_method" id="print_method" wire:model.live="printMethod">
+                                <option value="browser">Navegador</option>
+                                <option value="agent">Humana Print Agent</option>
                             </x-ui.select>
-                            <x-ui.input label="Porta do agente" name="print_agent_port" id="print_agent_port" type="number" min="1024" max="65535" wire:model="printAgentPort">
-                                <x-input-error :messages="$errors->get('printAgentPort')" />
-                            </x-ui.input>
-                        </div>
+                            <x-input-error :messages="$errors->get('printMethod')" />
 
-                        @if ($printAgentListenMode === 'lan')
-                            <x-ui.input
-                                label="IP ou hostname da CPU Windows"
-                                name="print_agent_host"
-                                id="print_agent_host"
-                                type="text"
-                                wire:model="printAgentHost"
-                                placeholder="ex.: 192.168.1.50"
-                            >
-                                <x-input-error :messages="$errors->get('printAgentHost')" />
-                            </x-ui.input>
-                            <p class="text-xs text-text-muted">
-                                No tablet Android, 127.0.0.1 não alcança a CPU do Totem. Informe o IP da máquina Windows onde o Humana Print Agent está instalado.
-                                No agente, configure <code class="font-mono">Print:ListenMode=Lan</code> e <code class="font-mono">Print:BindHost</code> conscientemente.
-                            </p>
-                        @else
-                            <p class="text-xs text-text-muted">Modo Local usa <code class="font-mono">http://127.0.0.1</code> na própria CPU Windows.</p>
-                        @endif
+                            @if ($printMethod === 'browser')
+                                <div class="rounded-lg border border-border bg-background px-3 py-3 text-sm text-text">
+                                    <p class="font-medium">Modo: Navegador</p>
+                                    <p class="mt-1 text-xs text-text-muted">
+                                        A impressão será realizada pelo navegador deste Totem.
+                                        O navegador poderá exibir a janela de impressão conforme sua configuração.
+                                    </p>
+                                </div>
 
-                        <div class="grid gap-3 md:grid-cols-2">
-                            <div>
-                                <p class="mb-1 text-sm font-medium text-text">Agente</p>
-                                @if ($printAgentStatus === 'online')
-                                    <p class="text-sm text-success">● Conectado</p>
-                                @elseif ($printAgentStatus === 'offline')
-                                    <p class="text-sm text-danger">● Agente não encontrado</p>
-                                @elseif ($printIsPaired)
-                                    <p class="text-sm text-warning">● Pareado (atualize impressoras para verificar conexão)</p>
+                                <div class="grid gap-3 md:grid-cols-2">
+                                    <x-ui.select label="Papel" name="print_paper_width" id="print_paper_width" wire:model="printPaperWidth">
+                                        <option value="80">80 mm</option>
+                                        <option value="58">58 mm</option>
+                                    </x-ui.select>
+                                </div>
+                                <p class="text-xs text-text-muted">
+                                    A largura ajusta o layout do comprovante. O tamanho físico final também depende do driver/impressora escolhida no navegador.
+                                </p>
+
+                                <div class="flex flex-wrap gap-2">
+                                    <x-ui.button type="button" variant="secondary" wire:click="prepareTestPrint">
+                                        Testar impressão
+                                    </x-ui.button>
+                                </div>
+                            @else
+                                <div class="rounded-lg border border-border bg-background px-3 py-3 text-sm text-text">
+                                    <p class="font-medium">Modo: Humana Print Agent</p>
+                                    <p class="mt-1 text-xs text-text-muted">
+                                        Impressão direta via agente local (HMAC). O segredo do agente nunca é embutido na tela pública.
+                                    </p>
+                                </div>
+
+                                <div class="grid gap-3 md:grid-cols-2">
+                                    <x-ui.select label="Modo do agente" name="print_agent_listen_mode" id="print_agent_listen_mode" wire:model.live="printAgentListenMode">
+                                        <option value="local">Local (navegador na CPU Windows)</option>
+                                        <option value="lan">LAN (tablet Android / outro dispositivo)</option>
+                                    </x-ui.select>
+                                    <x-ui.input label="Porta do agente" name="print_agent_port" id="print_agent_port" type="number" min="1024" max="65535" wire:model="printAgentPort">
+                                        <x-input-error :messages="$errors->get('printAgentPort')" />
+                                    </x-ui.input>
+                                </div>
+
+                                @if ($printAgentListenMode === 'lan')
+                                    <x-ui.input
+                                        label="IP ou hostname da CPU Windows"
+                                        name="print_agent_host"
+                                        id="print_agent_host"
+                                        type="text"
+                                        wire:model="printAgentHost"
+                                        placeholder="ex.: 192.168.1.50"
+                                    >
+                                        <x-input-error :messages="$errors->get('printAgentHost')" />
+                                    </x-ui.input>
+                                    <p class="text-xs text-text-muted">
+                                        No tablet Android, 127.0.0.1 não alcança a CPU do Totem. Informe o IP da máquina Windows onde o Humana Print Agent está instalado.
+                                        No agente, configure <code class="font-mono">Print:ListenMode=Lan</code> e <code class="font-mono">Print:BindHost</code> conscientemente.
+                                    </p>
                                 @else
-                                    <p class="text-sm text-warning">● Não pareado</p>
+                                    <p class="text-xs text-text-muted">Modo Local usa <code class="font-mono">http://127.0.0.1</code> na própria CPU Windows.</p>
                                 @endif
-                            </div>
-                        </div>
 
-                        <div class="flex flex-wrap gap-2">
-                            <x-ui.button type="button" variant="secondary" wire:click="pairPrintAgent" wire:confirm="Gerar novo segredo de pareamento? O anterior deixará de funcionar.">
-                                {{ $printIsPaired ? 'Refazer pareamento' : 'Parear agente' }}
-                            </x-ui.button>
-                            @if ($printIsPaired)
-                                <x-ui.button type="button" variant="secondary" wire:click="revokePrintAgent" wire:confirm="Revogar pareamento deste Totem?">
-                                    Revogar pareamento
-                                </x-ui.button>
-                                <x-ui.button type="button" variant="secondary" wire:click="prepareLoadPrinters">
-                                    Atualizar impressoras
-                                </x-ui.button>
-                                <x-ui.button type="button" variant="secondary" wire:click="prepareTestPrint">
-                                    Testar impressão
-                                </x-ui.button>
+                                <div class="grid gap-3 md:grid-cols-2">
+                                    <div>
+                                        <p class="mb-1 text-sm font-medium text-text">Agente</p>
+                                        @if ($printAgentStatus === 'online')
+                                            <p class="text-sm text-success">● Conectado</p>
+                                        @elseif ($printAgentStatus === 'offline')
+                                            <p class="text-sm text-danger">● Agente não encontrado</p>
+                                        @elseif ($printIsPaired)
+                                            <p class="text-sm text-warning">● Pareado (atualize impressoras para verificar conexão)</p>
+                                        @else
+                                            <p class="text-sm text-warning">● Não pareado</p>
+                                        @endif
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-wrap gap-2">
+                                    <x-ui.button type="button" variant="secondary" wire:click="pairPrintAgent" wire:confirm="Gerar novo segredo de pareamento? O anterior deixará de funcionar.">
+                                        {{ $printIsPaired ? 'Refazer pareamento' : 'Parear agente' }}
+                                    </x-ui.button>
+                                    @if ($printIsPaired)
+                                        <x-ui.button type="button" variant="secondary" wire:click="revokePrintAgent" wire:confirm="Revogar pareamento deste Totem?">
+                                            Revogar pareamento
+                                        </x-ui.button>
+                                        <x-ui.button type="button" variant="secondary" wire:click="prepareLoadPrinters">
+                                            Atualizar impressoras
+                                        </x-ui.button>
+                                        <x-ui.button type="button" variant="secondary" wire:click="prepareTestPrint">
+                                            Testar impressão
+                                        </x-ui.button>
+                                    @endif
+                                </div>
+
+                                @if ($pairingSecretOnce !== '')
+                                    <div class="rounded-lg border border-warning/40 bg-amber-50 px-3 py-3 text-sm text-text">
+                                        <p class="font-semibold">Segredo de pareamento (exibido uma vez)</p>
+                                        <p class="mt-1 break-all font-mono text-xs">{{ $pairingSecretOnce }}</p>
+                                        <p class="mt-2 text-xs text-text-muted">Cole em Print:PairingSecret no Humana Print Agent neste computador. Não grave este valor no frontend público.</p>
+                                    </div>
+                                @endif
+
+                                <div>
+                                    <x-ui.select label="Impressora" name="print_printer_name" id="print_printer_name" wire:model="printPrinterName">
+                                        <option value="">Selecione explicitamente</option>
+                                        @if ($printPrinterName !== '' && collect($availablePrinters)->where('name', $printPrinterName)->isEmpty())
+                                            <option value="{{ $printPrinterName }}">{{ $printPrinterName }} (salva)</option>
+                                        @endif
+                                        @foreach ($availablePrinters as $printer)
+                                            <option value="{{ $printer['name'] }}">{{ $printer['name'] }}@if (! empty($printer['isDefault'])) (padrão do Windows)@endif</option>
+                                        @endforeach
+                                    </x-ui.select>
+                                    <p class="mt-1 text-xs text-text-muted">Nunca selecionamos a primeira impressora automaticamente.</p>
+                                    <x-input-error :messages="$errors->get('printPrinterName')" />
+                                </div>
+
+                                <div class="grid gap-3 md:grid-cols-2">
+                                    <x-ui.select label="Papel" name="print_paper_width_agent" id="print_paper_width_agent" wire:model="printPaperWidth">
+                                        <option value="80">80 mm</option>
+                                        <option value="58">58 mm</option>
+                                    </x-ui.select>
+                                    <div class="flex flex-col justify-end gap-2">
+                                        <label class="flex min-h-11 items-center gap-3 text-sm text-text">
+                                            <input type="checkbox" wire:model="printAutoCut" class="size-4 rounded border-border text-accent">
+                                            Corte automático (se suportado)
+                                        </label>
+                                        <label class="flex min-h-11 items-center gap-3 text-sm text-text-muted">
+                                            <input type="checkbox" wire:model="printLogo" class="size-4 rounded border-border text-accent" disabled>
+                                            Imprimir logo (em breve)
+                                        </label>
+                                    </div>
+                                </div>
+                            @endif
+
+                            @if ($printStatusMessage !== '')
+                                <p class="text-sm text-text-muted">{{ $printStatusMessage }}</p>
                             @endif
                         </div>
-
-                        @if ($pairingSecretOnce !== '')
-                            <div class="rounded-lg border border-warning/40 bg-amber-50 px-3 py-3 text-sm text-text">
-                                <p class="font-semibold">Segredo de pareamento (exibido uma vez)</p>
-                                <p class="mt-1 break-all font-mono text-xs">{{ $pairingSecretOnce }}</p>
-                                <p class="mt-2 text-xs text-text-muted">Cole em Print:PairingSecret no Humana Print Agent neste computador. Não grave este valor no frontend público.</p>
-                            </div>
-                        @endif
-
-                        <div>
-                            <x-ui.select label="Impressora" name="print_printer_name" id="print_printer_name" wire:model="printPrinterName">
-                                <option value="">Selecione explicitamente</option>
-                                @if ($printPrinterName !== '' && collect($availablePrinters)->where('name', $printPrinterName)->isEmpty())
-                                    <option value="{{ $printPrinterName }}">{{ $printPrinterName }} (salva)</option>
-                                @endif
-                                @foreach ($availablePrinters as $printer)
-                                    <option value="{{ $printer['name'] }}">{{ $printer['name'] }}@if (! empty($printer['isDefault'])) (padrão do Windows)@endif</option>
-                                @endforeach
-                            </x-ui.select>
-                            <p class="mt-1 text-xs text-text-muted">Nunca selecionamos a primeira impressora automaticamente.</p>
-                            <x-input-error :messages="$errors->get('printPrinterName')" />
-                        </div>
-
-                        <div class="grid gap-3 md:grid-cols-2">
-                            <x-ui.select label="Papel" name="print_paper_width" id="print_paper_width" wire:model="printPaperWidth">
-                                <option value="80">80 mm</option>
-                                <option value="58">58 mm</option>
-                            </x-ui.select>
-                            <div class="flex flex-col justify-end gap-2">
-                                <label class="flex min-h-11 items-center gap-3 text-sm text-text">
-                                    <input type="checkbox" wire:model="printAutoCut" class="size-4 rounded border-border text-accent">
-                                    Corte automático (se suportado)
-                                </label>
-                                <label class="flex min-h-11 items-center gap-3 text-sm text-text-muted">
-                                    <input type="checkbox" wire:model="printLogo" class="size-4 rounded border-border text-accent" disabled>
-                                    Imprimir logo (em breve)
-                                </label>
-                            </div>
-                        </div>
-
-                        @if ($printStatusMessage !== '')
-                            <p class="text-sm text-text-muted">{{ $printStatusMessage }}</p>
-                        @endif
                     </div>
                 @endif
 

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\KioskPrintMethod;
 use App\Models\Kiosk;
 use App\Support\KioskPrintPayload;
 use Illuminate\Contracts\Encryption\DecryptException;
@@ -116,7 +117,9 @@ class KioskPrintGrantService
      */
     public function grantPrintTicket(Kiosk $kiosk, string $jobId, array $ticketPayload): ?array
     {
-        if (! $kiosk->print_enabled || ! $this->hasPairing($kiosk)) {
+        if (! $kiosk->print_enabled
+            || KioskPrintMethod::normalize($kiosk->print_method) !== KioskPrintMethod::Agent
+            || ! $this->hasPairing($kiosk)) {
             return null;
         }
 

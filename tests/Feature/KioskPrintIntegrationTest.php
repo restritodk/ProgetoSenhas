@@ -31,6 +31,7 @@ class KioskPrintIntegrationTest extends TestCase
 
         $kiosk->forceFill([
             'print_enabled' => true,
+            'print_method' => 'agent',
             'print_printer_name' => 'MOCK Thermal 80mm',
             'print_paper_width' => '80',
             'print_auto_cut' => true,
@@ -39,7 +40,8 @@ class KioskPrintIntegrationTest extends TestCase
         $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
             ->call('issue', $type->id)
             ->assertSet('screen', 'result')
-            ->assertNotSet('printDispatch', null);
+            ->assertNotSet('printDispatch', null)
+            ->assertDispatched('kiosk-print-ticket');
 
         $dispatch = $component->get('printDispatch');
         $this->assertIsArray($dispatch);
@@ -53,6 +55,10 @@ class KioskPrintIntegrationTest extends TestCase
 
         $this->assertTrue($grants->verify($dispatch['grant'], $dispatch['signature'], $secret));
         $this->assertSame($dispatch['grant']['jobId'], KioskPrintPayload::jobIdForTicket((int) $component->get('issuedTicketId')));
+
+        $exp = (int) ($dispatch['grant']['exp'] ?? 0);
+        $this->assertTrue($exp > now()->getTimestamp());
+        $this->assertTrue($exp <= now()->addSeconds(KioskPrintGrantService::GRANT_TTL_SECONDS + 5)->getTimestamp());
     }
 
     public function test_disabled_print_does_not_dispatch_and_agent_absence_keeps_ticket(): void
@@ -63,9 +69,177 @@ class KioskPrintIntegrationTest extends TestCase
             ->call('issue', $type->id)
             ->assertSet('screen', 'result')
             ->assertSet('printDispatch', null)
+            ->assertNotDispatched('kiosk-print-ticket')
             ->assertNotSet('issuedDisplayCode', '');
 
         $this->assertSame(1, Ticket::query()->count());
+    }
+
+    public function test_double_issue_while_result_screen_does_not_create_second_ticket(): void
+    {
+        [$admin, $kiosk, $type] = $this->ready();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $type->id)
+            ->assertSet('screen', 'result')
+            ->call('issue', $type->id);
+
+        $this->assertSame(1, Ticket::query()->count());
+        $this->assertSame('result', $component->get('screen'));
+    }
+
+    public function test_print_dispatch_uses_same_ticket_and_failure_path_keeps_ticket(): void
+    {
+        [$admin, $kiosk, $type] = $this->ready();
+        $grants = app(KioskPrintGrantService::class);
+        $grants->pair($kiosk);
+        $kiosk->forceFill([
+            'print_enabled' => true,
+            'print_method' => 'agent',
+            'print_printer_name' => 'MOCK Thermal 80mm',
+        ])->save();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $type->id)
+            ->assertSet('screen', 'result')
+            ->assertDispatched('kiosk-print-ticket');
+
+        $ticketId = (int) $component->get('issuedTicketId');
+        $this->assertSame(1, Ticket::query()->count());
+        $this->assertDatabaseHas('tickets', ['id' => $ticketId]);
+
+        // Simulates agent offline / print failure: clearing dispatch must not cancel the ticket.
+        $component->call('clearPrintDispatch')
+            ->assertSet('printDispatch', null)
+            ->assertSet('screen', 'result')
+            ->assertSet('issuedTicketId', $ticketId);
+
+        $ticket = Ticket::query()->find($ticketId);
+        $this->assertNotNull($ticket);
+        $this->assertSame($component->get('issuedDisplayCode'), $ticket->display_code);
+        $this->assertSame(1, Ticket::query()->count());
+    }
+
+    public function test_browser_method_requests_native_print_without_agent_grant(): void
+    {
+        [$admin, $kiosk, $type] = $this->ready();
+
+        $kiosk->forceFill([
+            'print_enabled' => true,
+            'print_method' => 'browser',
+            'print_paper_width' => '58',
+            'print_printer_name' => 'SHOULD-NOT-MATTER',
+        ])->save();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $type->id)
+            ->assertSet('screen', 'result')
+            ->assertSet('printDispatch', null)
+            ->assertNotDispatched('kiosk-print-ticket')
+            ->assertDispatched('kiosk-browser-print');
+
+        $payload = $component->get('browserPrintPayload');
+        $this->assertIsArray($payload);
+        $this->assertSame($component->get('issuedDisplayCode'), $payload['displayCode']);
+        $this->assertSame('58', $payload['paperWidth']);
+        $this->assertArrayNotHasKey('signature', $payload);
+        $this->assertArrayNotHasKey('agentUrl', $payload);
+        $this->assertSame(1, Ticket::query()->count());
+    }
+
+    public function test_disabled_print_skips_browser_and_agent(): void
+    {
+        [$admin, $kiosk, $type] = $this->ready();
+        $grants = app(KioskPrintGrantService::class);
+        $grants->pair($kiosk);
+        $kiosk->forceFill([
+            'print_enabled' => false,
+            'print_method' => 'browser',
+            'print_printer_name' => 'MOCK Thermal 80mm',
+        ])->save();
+
+        Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $type->id)
+            ->assertSet('screen', 'result')
+            ->assertSet('printDispatch', null)
+            ->assertSet('browserPrintPayload', null)
+            ->assertNotDispatched('kiosk-print-ticket')
+            ->assertNotDispatched('kiosk-browser-print');
+
+        $this->assertSame(1, Ticket::query()->count());
+    }
+
+    public function test_switching_agent_to_browser_keeps_agent_settings(): void
+    {
+        [$admin, $kiosk] = $this->ready();
+        $grants = app(KioskPrintGrantService::class);
+        $secret = $grants->pair($kiosk);
+        $kiosk->forceFill([
+            'print_enabled' => true,
+            'print_method' => 'agent',
+            'print_printer_name' => 'EPSON TM-T20',
+            'print_agent_port' => 17321,
+            'print_agent_listen_mode' => 'local',
+            'print_paper_width' => '80',
+            'print_auto_cut' => true,
+        ])->save();
+
+        Livewire::actingAs($admin)
+            ->test(KiosksManager::class)
+            ->call('edit', $kiosk->id)
+            ->set('printMethod', 'browser')
+            ->set('printEnabled', true)
+            ->set('printPaperWidth', '58')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $kiosk->refresh();
+        $this->assertSame('browser', $kiosk->print_method->value);
+        $this->assertTrue($kiosk->print_enabled);
+        $this->assertSame('58', $kiosk->print_paper_width);
+        $this->assertSame('EPSON TM-T20', $kiosk->print_printer_name);
+        $this->assertSame(17321, (int) $kiosk->print_agent_port);
+        $this->assertSame($secret, $grants->decryptSecret($kiosk));
+    }
+
+    public function test_browser_test_print_does_not_create_ticket(): void
+    {
+        [$admin, $kiosk] = $this->ready();
+        $kiosk->forceFill([
+            'print_method' => 'browser',
+            'print_paper_width' => '80',
+        ])->save();
+
+        Livewire::actingAs($admin)
+            ->test(KiosksManager::class)
+            ->call('edit', $kiosk->id)
+            ->set('printMethod', 'browser')
+            ->call('prepareTestPrint')
+            ->assertDispatched('kiosk-browser-test-print')
+            ->assertNotDispatched('kiosk-agent-test-print');
+
+        $this->assertSame(0, Ticket::query()->count());
+    }
+
+    public function test_agent_test_print_still_does_not_create_ticket(): void
+    {
+        [$admin, $kiosk] = $this->ready();
+        $grants = app(KioskPrintGrantService::class);
+        $grants->pair($kiosk);
+        $kiosk->forceFill([
+            'print_method' => 'agent',
+            'print_printer_name' => 'MOCK Thermal 80mm',
+        ])->save();
+
+        Livewire::actingAs($admin)
+            ->test(KiosksManager::class)
+            ->call('edit', $kiosk->id)
+            ->set('printMethod', 'agent')
+            ->set('printPrinterName', 'MOCK Thermal 80mm')
+            ->call('prepareTestPrint')
+            ->assertDispatched('kiosk-agent-test-print');
+
+        $this->assertSame(0, Ticket::query()->count());
     }
 
     public function test_finish_clears_result_after_emission(): void
@@ -214,6 +388,7 @@ class KioskPrintIntegrationTest extends TestCase
 
         $kiosk->forceFill([
             'print_enabled' => true,
+            'print_method' => 'agent',
             'print_printer_name' => 'MOCK Thermal 80mm',
             'print_agent_listen_mode' => 'local',
         ])->save();
@@ -235,6 +410,7 @@ class KioskPrintIntegrationTest extends TestCase
 
         $kiosk->forceFill([
             'print_enabled' => true,
+            'print_method' => 'agent',
             'print_printer_name' => 'MOCK Thermal 80mm',
             'print_agent_listen_mode' => 'lan',
             'print_agent_host' => null,

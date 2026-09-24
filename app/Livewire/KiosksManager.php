@@ -6,11 +6,13 @@ use App\Actions\CreateKiosk;
 use App\Actions\EnsureDefaultSectorForUnit;
 use App\Actions\RegenerateKioskToken;
 use App\Actions\UpdateKiosk;
+use App\KioskPrintMethod;
 use App\Models\Kiosk;
 use App\Models\Sector;
 use App\Models\Unit;
 use App\Services\ClinicBranding;
 use App\Services\KioskPrintGrantService;
+use App\Support\KioskPrintPayload;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -46,6 +48,8 @@ class KiosksManager extends Component
 
     public bool $printEnabled = false;
 
+    public string $printMethod = 'browser';
+
     public string $printAgentListenMode = 'local';
 
     public string $printAgentHost = '';
@@ -77,6 +81,21 @@ class KiosksManager extends Component
 
     /** @var array{grant: array<string, mixed>, signature: string, agentUrl: string}|null */
     public ?array $testPrintGrant = null;
+
+    /**
+     * Payload for browser-native test print (admin).
+     *
+     * @var array{
+     *     clinicName: string,
+     *     unitName: string,
+     *     displayCode: string,
+     *     typeLabel: string,
+     *     issuedAtLabel: string,
+     *     message: string,
+     *     paperWidth: string
+     * }|null
+     */
+    public ?array $browserTestPrintPayload = null;
 
     public ?int $kioskPendingDeactivationId = null;
 
@@ -155,6 +174,7 @@ class KiosksManager extends Component
         $this->sectorId = $kiosk->sector_id;
         $this->active = $kiosk->active;
         $this->printEnabled = (bool) $kiosk->print_enabled;
+        $this->printMethod = KioskPrintMethod::normalize($kiosk->print_method)->value;
         $this->printAgentListenMode = app(KioskPrintGrantService::class)->normalizeListenMode($kiosk->print_agent_listen_mode ?? 'local');
         $this->printAgentHost = (string) ($kiosk->print_agent_host ?? '');
         $this->printAgentPort = (int) ($kiosk->print_agent_port ?: KioskPrintGrantService::DEFAULT_PORT);
@@ -169,6 +189,7 @@ class KiosksManager extends Component
         $this->availablePrinters = [];
         $this->printerListGrant = null;
         $this->testPrintGrant = null;
+        $this->browserTestPrintPayload = null;
         $this->showForm = true;
         $this->kioskPendingDeactivationId = null;
         $this->kioskPendingTokenRegenId = null;
@@ -322,6 +343,40 @@ class KiosksManager extends Component
         $kiosk = $this->kioskForCurrentClinic($this->editingKioskId);
         $this->authorize('update', $kiosk);
 
+        $method = KioskPrintMethod::normalize($this->printMethod);
+        $paperWidth = $printGrants->normalizePaperWidth($this->printPaperWidth);
+        $clinicName = $branding->displayName($kiosk->clinic);
+        $unitName = (string) ($kiosk->unit?->name ?? $kiosk->name);
+
+        if ($method === KioskPrintMethod::Browser) {
+            $this->testPrintGrant = null;
+            $this->browserTestPrintPayload = [
+                ...KioskPrintPayload::forTicket(
+                    displayCode: 'TESTE',
+                    typeLabel: 'IMPRESSÃO DE TESTE',
+                    clinicName: $clinicName,
+                    unitName: 'Totem: '.($kiosk->name !== '' ? $kiosk->name : $unitName),
+                    issuedAtLabel: now()->timezone(config('app.timezone'))->format('d/m/Y H:i'),
+                    message: 'Comprovante de teste do navegador. Nenhuma senha foi emitida.',
+                ),
+                'paperWidth' => $paperWidth,
+            ];
+
+            $this->dispatch(
+                'kiosk-browser-test-print',
+                clinicName: $this->browserTestPrintPayload['clinicName'],
+                unitName: $this->browserTestPrintPayload['unitName'],
+                displayCode: $this->browserTestPrintPayload['displayCode'],
+                typeLabel: $this->browserTestPrintPayload['typeLabel'],
+                issuedAtLabel: $this->browserTestPrintPayload['issuedAtLabel'],
+                message: $this->browserTestPrintPayload['message'],
+                paperWidth: $paperWidth,
+            );
+            $this->printStatusMessage = 'Janela de impressão do navegador solicitada (teste).';
+
+            return;
+        }
+
         if (trim($this->printPrinterName) === '') {
             $this->printStatusMessage = 'Selecione uma impressora antes de testar.';
 
@@ -329,22 +384,23 @@ class KiosksManager extends Component
         }
 
         $kiosk->forceFill([
+            'print_method' => KioskPrintMethod::Agent->value,
             'print_printer_name' => trim($this->printPrinterName),
-            'print_paper_width' => $printGrants->normalizePaperWidth($this->printPaperWidth),
+            'print_paper_width' => $paperWidth,
             'print_auto_cut' => $this->printAutoCut,
             'print_agent_listen_mode' => $printGrants->normalizeListenMode($this->printAgentListenMode),
             'print_agent_host' => $printGrants->normalizeAgentHost($this->printAgentHost),
             'print_agent_port' => max(1024, min(65535, (int) $this->printAgentPort)),
         ])->save();
 
-        $clinicName = $branding->displayName($kiosk->clinic);
         $grant = $printGrants->grantPrintTest(
             $kiosk->fresh(),
             $clinicName,
-            (string) ($kiosk->unit?->name ?? $kiosk->name),
+            $unitName,
         );
 
         $this->testPrintGrant = null;
+        $this->browserTestPrintPayload = null;
 
         if ($grant === null) {
             $this->printStatusMessage = 'Não foi possível gerar o teste. Verifique o pareamento e a impressora.';
@@ -358,6 +414,11 @@ class KiosksManager extends Component
             signature: $grant['signature'],
             agentUrl: $grant['agentUrl'],
         );
+    }
+
+    public function clearBrowserTestPrintPayload(): void
+    {
+        $this->browserTestPrintPayload = null;
     }
 
     public function setPrintStatusMessage(string $message): void
@@ -549,6 +610,7 @@ class KiosksManager extends Component
             ],
             'active' => ['boolean'],
             'printEnabled' => ['boolean'],
+            'printMethod' => ['required', Rule::in(['browser', 'agent'])],
             'printAgentListenMode' => ['required', Rule::in(['local', 'lan'])],
             'printAgentHost' => ['nullable', 'string', 'max:255'],
             'printAgentPort' => ['integer', 'min:1024', 'max:65535'],
@@ -573,6 +635,7 @@ class KiosksManager extends Component
             'unitId.exists' => 'A unidade selecionada não pertence à sua clínica.',
             'sectorId.required' => 'Selecione o setor.',
             'sectorId.exists' => 'O setor selecionado não pertence à unidade informada.',
+            'printMethod.in' => 'Selecione Navegador ou Humana Print Agent.',
             'printAgentListenMode.in' => 'Selecione o modo Local ou LAN.',
         ];
     }
@@ -582,24 +645,28 @@ class KiosksManager extends Component
         $this->authorize('update', $kiosk);
 
         $printGrants = app(KioskPrintGrantService::class);
+        $method = KioskPrintMethod::normalize($this->printMethod);
         $listenMode = $printGrants->normalizeListenMode($this->printAgentListenMode);
         $agentHost = $printGrants->normalizeAgentHost($this->printAgentHost);
 
-        if ($listenMode === KioskPrintGrantService::LISTEN_LAN && $agentHost === null) {
-            $this->printEnabled = false;
-            $this->addError('printAgentHost', 'No modo LAN, informe o IP ou hostname da CPU Windows do Totem.');
-        }
+        if ($method === KioskPrintMethod::Agent) {
+            if ($listenMode === KioskPrintGrantService::LISTEN_LAN && $agentHost === null) {
+                $this->printEnabled = false;
+                $this->addError('printAgentHost', 'No modo LAN, informe o IP ou hostname da CPU Windows do Totem.');
+            }
 
-        if ($this->printEnabled && (! filled($kiosk->print_agent_secret_encrypted) || trim($this->printPrinterName) === '')) {
-            $this->printEnabled = false;
-        }
+            if ($this->printEnabled && (! filled($kiosk->print_agent_secret_encrypted) || trim($this->printPrinterName) === '')) {
+                $this->printEnabled = false;
+            }
 
-        if ($this->printEnabled && $listenMode === KioskPrintGrantService::LISTEN_LAN && $agentHost === null) {
-            $this->printEnabled = false;
+            if ($this->printEnabled && $listenMode === KioskPrintGrantService::LISTEN_LAN && $agentHost === null) {
+                $this->printEnabled = false;
+            }
         }
 
         $kiosk->forceFill([
             'print_enabled' => $this->printEnabled,
+            'print_method' => $method->value,
             'print_agent_listen_mode' => $listenMode,
             'print_agent_host' => $listenMode === KioskPrintGrantService::LISTEN_LAN ? $agentHost : null,
             'print_agent_port' => max(1024, min(65535, (int) $this->printAgentPort)),
@@ -629,6 +696,7 @@ class KiosksManager extends Component
         $this->sectorId = null;
         $this->active = true;
         $this->printEnabled = false;
+        $this->printMethod = KioskPrintMethod::Browser->value;
         $this->printAgentListenMode = 'local';
         $this->printAgentHost = '';
         $this->printAgentPort = KioskPrintGrantService::DEFAULT_PORT;
@@ -643,6 +711,7 @@ class KiosksManager extends Component
         $this->availablePrinters = [];
         $this->printerListGrant = null;
         $this->testPrintGrant = null;
+        $this->browserTestPrintPayload = null;
         $this->kioskPendingDeactivationId = null;
         $this->kioskPendingTokenRegenId = null;
     }

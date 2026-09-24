@@ -688,3 +688,89 @@
     }
 }
 
+/* Browser-native thermal receipt (Totem print_method=browser) */
+.kiosk-print-receipt {
+    display: none;
+}
+
+@media print {
+    @page {
+        margin: 4mm;
+    }
+
+    html,
+    body {
+        background: #fff !important;
+        color: #000 !important;
+    }
+
+    body * {
+        visibility: hidden !important;
+    }
+
+    .kiosk-print-receipt,
+    .kiosk-print-receipt * {
+        visibility: visible !important;
+    }
+
+    .kiosk-print-receipt {
+        display: block !important;
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: #000;
+        font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+        text-align: center;
+        line-height: 1.35;
+        margin: 0 auto;
+        padding: 2mm 0;
+    }
+
+    .kiosk-print-receipt[data-width='58'] {
+        width: 54mm;
+        max-width: 54mm;
+        font-size: 11px;
+    }
+
+    .kiosk-print-receipt[data-width='80'] {
+        width: 72mm;
+        max-width: 72mm;
+        font-size: 13px;
+    }
+
+    .kiosk-print-receipt__clinic {
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0 0 2mm;
+    }
+
+    .kiosk-print-receipt__unit {
+        margin: 0 0 4mm;
+        font-size: 0.95em;
+    }
+
+    .kiosk-print-receipt__label {
+        margin: 0 0 1mm;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+    }
+
+    .kiosk-print-receipt__code {
+        margin: 0 0 2mm;
+        font-size: 2.1em;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+    }
+
+    .kiosk-print-receipt__type,
+    .kiosk-print-receipt__at,
+    .kiosk-print-receipt__message {
+        margin: 0 0 2mm;
+    }
+
+    .kiosk-print-receipt__message {
+        margin-top: 4mm;
+    }
+}
+

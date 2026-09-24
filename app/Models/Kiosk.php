@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\KioskPrintMethod;
 use App\Support\PublicAccessCode;
 use Database\Factories\KioskFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,11 +26,19 @@ class Kiosk extends Model
         'print_agent_secret_encrypted',
     ];
 
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'print_method' => 'browser',
+    ];
+
     protected function casts(): array
     {
         return [
             'active' => 'boolean',
             'print_enabled' => 'boolean',
+            'print_method' => KioskPrintMethod::class,
             'print_auto_cut' => 'boolean',
             'print_logo' => 'boolean',
             'print_agent_port' => 'integer',
@@ -85,10 +94,37 @@ class Kiosk extends Model
             && $this->unit?->active === true;
     }
 
+    public function printMethod(): KioskPrintMethod
+    {
+        return KioskPrintMethod::normalize($this->print_method);
+    }
+
+    public function usesBrowserPrint(): bool
+    {
+        return $this->printMethod() === KioskPrintMethod::Browser;
+    }
+
+    public function usesAgentPrint(): bool
+    {
+        return $this->printMethod() === KioskPrintMethod::Agent;
+    }
+
+    /**
+     * Whether automatic print can proceed for the configured method.
+     * Browser: only needs print_enabled.
+     * Agent: needs pairing, printer, and valid Local/LAN settings.
+     */
     public function isPrintReady(): bool
     {
-        if (! $this->print_enabled
-            || ! filled($this->print_agent_secret_encrypted)
+        if (! $this->print_enabled) {
+            return false;
+        }
+
+        if ($this->usesBrowserPrint()) {
+            return true;
+        }
+
+        if (! filled($this->print_agent_secret_encrypted)
             || ! filled($this->print_printer_name)) {
             return false;
         }

@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Actions\IssueTicket;
+use App\KioskPrintMethod;
 use App\Models\Kiosk;
 use App\Models\SectorTicketType;
 use App\Models\UnitTicketType;
@@ -13,6 +14,7 @@ use App\Support\KioskPresentation;
 use App\Support\KioskPrintPayload;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
@@ -51,6 +53,21 @@ class PublicKiosk extends Component
      */
     public ?array $printDispatch = null;
 
+    /**
+     * Browser-native receipt payload (no secrets, no agent URL).
+     *
+     * @var array{
+     *     clinicName: string,
+     *     unitName: string,
+     *     displayCode: string,
+     *     typeLabel: string,
+     *     issuedAtLabel: string,
+     *     message: string,
+     *     paperWidth: string
+     * }|null
+     */
+    public ?array $browserPrintPayload = null;
+
     public function mount(string $publicToken, ClinicSettings $settings, ClinicBranding $branding): void
     {
         $this->publicToken = $publicToken;
@@ -82,6 +99,7 @@ class PublicKiosk extends Component
         $this->issuingTicketTypeId = $ticketTypeId;
         $this->errorMessage = '';
         $this->printDispatch = null;
+        $this->browserPrintPayload = null;
 
         $kiosk = $this->kiosk;
 
@@ -144,18 +162,87 @@ class PublicKiosk extends Component
                 $unitName = $unitName !== '' ? $unitName.' · '.$sectorName : $sectorName;
             }
 
-            $this->printDispatch = $printGrants->grantPrintTicket(
-                $kiosk->fresh(),
-                KioskPrintPayload::jobIdForTicket((int) $ticket->id),
-                KioskPrintPayload::forTicket(
-                    displayCode: $ticket->display_code,
-                    typeLabel: $typeLabel,
-                    clinicName: $clinicName,
-                    unitName: $unitName,
-                    issuedAtLabel: $issuedAtLabel,
-                    message: (string) ($bag['kiosk_issued_message'] ?? 'Aguarde sua senha ser chamada no painel.'),
-                ),
+            $kioskForPrint = $kiosk->fresh();
+            $message = (string) ($bag['kiosk_issued_message'] ?? 'Aguarde sua senha ser chamada no painel.');
+            $ticketPayload = KioskPrintPayload::forTicket(
+                displayCode: $ticket->display_code,
+                typeLabel: $typeLabel,
+                clinicName: $clinicName,
+                unitName: $unitName,
+                issuedAtLabel: $issuedAtLabel,
+                message: $message,
             );
+
+            $printMethod = KioskPrintMethod::normalize($kioskForPrint->print_method);
+
+            if (! $kioskForPrint->print_enabled) {
+                Log::info('kiosk.print.skipped_disabled', [
+                    'kiosk_id' => $kioskForPrint->id,
+                    'ticket_id' => $ticket->id,
+                    'display_code' => $ticket->display_code,
+                    'print_method' => $printMethod->value,
+                ]);
+            } elseif ($printMethod === KioskPrintMethod::Browser) {
+                $paperWidth = $printGrants->normalizePaperWidth($kioskForPrint->print_paper_width);
+                $this->browserPrintPayload = [
+                    ...$ticketPayload,
+                    'paperWidth' => $paperWidth,
+                ];
+
+                Log::info('kiosk.print.browser_print_requested', [
+                    'kiosk_id' => $kioskForPrint->id,
+                    'ticket_id' => $ticket->id,
+                    'display_code' => $ticket->display_code,
+                    'paper_width' => $paperWidth,
+                ]);
+
+                $this->dispatch(
+                    'kiosk-browser-print',
+                    clinicName: $ticketPayload['clinicName'],
+                    unitName: $ticketPayload['unitName'],
+                    displayCode: $ticketPayload['displayCode'],
+                    typeLabel: $ticketPayload['typeLabel'],
+                    issuedAtLabel: $ticketPayload['issuedAtLabel'],
+                    message: $ticketPayload['message'],
+                    paperWidth: $paperWidth,
+                );
+            } else {
+                $this->printDispatch = $printGrants->grantPrintTicket(
+                    $kioskForPrint,
+                    KioskPrintPayload::jobIdForTicket((int) $ticket->id),
+                    $ticketPayload,
+                );
+
+                if ($this->printDispatch === null) {
+                    Log::info('kiosk.print.grant_skipped', [
+                        'kiosk_id' => $kioskForPrint->id,
+                        'ticket_id' => $ticket->id,
+                        'display_code' => $ticket->display_code,
+                        'print_enabled' => (bool) $kioskForPrint->print_enabled,
+                        'print_method' => $printMethod->value,
+                        'paired' => filled($kioskForPrint->print_agent_secret_encrypted),
+                        'has_printer' => filled($kioskForPrint->print_printer_name),
+                        'listen_mode' => $kioskForPrint->print_agent_listen_mode,
+                        'print_ready' => $kioskForPrint->isPrintReady(),
+                    ]);
+                } else {
+                    Log::info('kiosk.print.grant_created', [
+                        'kiosk_id' => $kioskForPrint->id,
+                        'ticket_id' => $ticket->id,
+                        'display_code' => $ticket->display_code,
+                        'job_id' => $this->printDispatch['grant']['jobId'] ?? null,
+                        'agent_url' => $this->printDispatch['agentUrl'] ?? null,
+                        'printer' => $this->printDispatch['grant']['printer'] ?? null,
+                    ]);
+
+                    $this->dispatch(
+                        'kiosk-print-ticket',
+                        grant: $this->printDispatch['grant'],
+                        signature: $this->printDispatch['signature'],
+                        agentUrl: $this->printDispatch['agentUrl'],
+                    );
+                }
+            }
         } catch (TooManyRequestsHttpException $exception) {
             $this->errorMessage = 'Não foi possível emitir sua senha. Aguarde um momento e tente novamente.';
         } catch (ValidationException $exception) {
@@ -188,6 +275,11 @@ class PublicKiosk extends Component
         $this->printDispatch = null;
     }
 
+    public function clearBrowserPrintPayload(): void
+    {
+        $this->browserPrintPayload = null;
+    }
+
     public function finish(): void
     {
         $this->resetResult();
@@ -196,6 +288,7 @@ class PublicKiosk extends Component
         $this->issuing = false;
         $this->issuingTicketTypeId = null;
         $this->printDispatch = null;
+        $this->browserPrintPayload = null;
         $this->refreshRequestToken();
     }
 
