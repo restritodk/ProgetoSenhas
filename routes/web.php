@@ -30,6 +30,16 @@ use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/login');
 
+Route::get('/sond/EfeitoSonoroTV.mp3', function () {
+    $path = public_path('sond/EfeitoSonoroTV.mp3');
+    abort_unless(is_file($path), 404);
+
+    return response()->file($path, [
+        'Content-Type' => 'audio/mpeg',
+        'Cache-Control' => 'public, max-age=86400',
+    ]);
+})->name('tv.call-effect');
+
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [LoginController::class, 'create'])->name('login');
     Route::post('/login', [LoginController::class, 'store'])

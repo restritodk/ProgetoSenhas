@@ -80,6 +80,7 @@ class TvSmartTvCallEffectTest extends TestCase
         // Desktop keeps the preload element but announce must not select the Smart TV branch.
         $this->assertStringContainsString('smart-tv effect selected', $html);
         $this->assertStringContainsString('/sond/EfeitoSonoroTV.mp3', $html);
+        $this->assertStringContainsString('Do not call audio.load() here', $html);
     }
 
     public function test_initial_and_recall_dispatch_for_smart_tv_without_role_filter(): void
@@ -202,6 +203,27 @@ class TvSmartTvCallEffectTest extends TestCase
     {
         $this->assertFileExists(public_path('sond/EfeitoSonoroTV.mp3'));
         $this->assertGreaterThan(1000, filesize(public_path('sond/EfeitoSonoroTV.mp3')));
+    }
+
+    public function test_effect_mp3_is_served_as_audio_mpeg(): void
+    {
+        $path = public_path('sond/EfeitoSonoroTV.mp3');
+        $this->assertFileExists($path);
+
+        $response = $this->get(route('tv.call-effect'));
+
+        $response->assertOk();
+        $contentType = (string) $response->headers->get('Content-Type');
+        $this->assertTrue(
+            str_contains($contentType, 'audio/mpeg')
+            || str_contains($contentType, 'audio/mp3'),
+            'Expected audio/mpeg Content-Type, got: '.$contentType
+        );
+        $length = (int) $response->headers->get('Content-Length');
+        if ($length === 0) {
+            $length = (int) filesize($path);
+        }
+        $this->assertGreaterThan(1000, $length);
     }
 
     private function panel(array $overrides = []): DisplayPanel

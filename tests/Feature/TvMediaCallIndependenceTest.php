@@ -30,7 +30,7 @@ class TvMediaCallIndependenceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_media_player_does_not_duck_or_pause_on_ticket_call_events(): void
+    public function test_media_player_keeps_call_sound_independent_from_media_mute(): void
     {
         $panel = $this->panelWithPlaylist();
 
@@ -41,10 +41,15 @@ class TvMediaCallIndependenceTest extends TestCase
 
         $this->assertStringContainsString('tvMediaPlayer', $html);
         $this->assertStringContainsString('wire:ignore', $html);
-        $this->assertStringContainsString('resumeCurrentPlayback', $html);
+        $this->assertStringContainsString('callDucked', $html);
+        $this->assertStringContainsString('restoreMediaAudioAfterCall', $html);
+        $this->assertStringContainsString('enforceConfiguredMute', $html);
+        $this->assertStringContainsString('play_with_audio === true', $html);
         $this->assertStringContainsString('tv-call-audio-begin', $html);
         $this->assertStringContainsString('tv-call-audio-end', $html);
-        $this->assertStringNotContainsString('callDucked', $html);
+        // Soft-resume remount regression must stay gone.
+        $this->assertStringNotContainsString('resumeCurrentPlayback', $html);
+        $this->assertStringNotContainsString('scheduleSoftResume', $html);
         $this->assertStringNotContainsString('pauseVideo', $html);
         $this->assertStringNotContainsString('stopVideo', $html);
         $this->assertStringNotContainsString('video.pause(', $html);

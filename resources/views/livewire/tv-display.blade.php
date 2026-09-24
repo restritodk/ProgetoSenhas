@@ -23,6 +23,16 @@
     // Relative URL — absolute asset(APP_URL) breaks when the TV opens the panel by IP/host mismatch.
     $smartTvEffectUrl = '/sond/EfeitoSonoroTV.mp3';
     $tvAudioDebug = (bool) config('app.debug');
+    // Classic sRGB gradient (no "in oklab"). Tailwind v4's bg-gradient-to-r emits
+    // `to right in oklab`, which Samsung Smart TV browsers treat as invalid and drop.
+    // Start stop matches design-system --color-success (#15803d); via/to come from clinic branding.
+    $footerBandFrom = '#15803d';
+    $footerBandCss = sprintf(
+        'background-color: %1$s; background-image: linear-gradient(to right, %2$s, %1$s, %3$s);',
+        $accentColor,
+        $footerBandFrom,
+        $primaryColor,
+    );
 @endphp
 <div
     wire:poll.3s="refreshFeed"
@@ -197,7 +207,7 @@
         >
             {{-- MEDIA: @island skips morph on TicketCall polls so Alpine/video/YouTube keep playing.
                  Playlist updates stay on the nested TvMediaPlayer poll + window event.
-                 Call audio may auto-pause YouTube in the browser — player resumes on tv-call-audio-*. --}}
+                 Call effect must not remount the player or unmute SEM ÁUDIO media. --}}
             <section class="relative min-h-0 overflow-hidden rounded-xl border-2 border-primary bg-primary shadow-sm max-md:order-3 sm:rounded-2xl sm:border-[3px] md:order-none">
                 @island(name: 'tv-media')
                     <livewire:tv-media-player
@@ -293,9 +303,9 @@
             </aside>
         </main>
 
-        {{-- FOOTER --}}
+        {{-- FOOTER: clinic accent/primary via classic linear-gradient (Smart TV safe). --}}
         @if ($footerEnabled)
-        <footer class="tv-footer flex shrink-0 items-stretch bg-gradient-to-r from-success via-accent to-primary text-white">
+        <footer class="tv-footer flex shrink-0 items-stretch text-white" style="{{ $footerBandCss }}">
             <div class="mx-auto grid h-full w-full max-w-[100rem] grid-cols-3 divide-x divide-white/20">
                 <div class="flex items-center justify-center gap-1.5 px-1 text-center sm:gap-3 sm:px-3 lg:px-4">
                     <span class="hidden text-xl md:inline lg:text-2xl" aria-hidden="true">👁</span>
@@ -448,7 +458,7 @@
             },
 
             ensureSmartTvEffect(panel) {
-                if (panel.effectAudio) {
+                if (panel.effectAudio && panel.effectAudio.isConnected !== false) {
                     return panel.effectAudio;
                 }
 
@@ -473,13 +483,19 @@
 
                 try {
                     // Prefer relative path so host/IP mismatches do not break the TV.
-                    if (!audio.getAttribute('src') || audio.getAttribute('src') !== url) {
+                    // Do NOT call load() again when src is already set — Samsung may revoke
+                    // the unmuted unlock granted on the "Ativar som" gesture.
+                    const currentSrc = audio.getAttribute('src') || '';
+                    if (currentSrc !== url) {
                         audio.setAttribute('src', url);
                         audio.src = url;
+                        audio.preload = 'auto';
+                        audio.playsInline = true;
+                        audio.load();
+                    } else {
+                        audio.preload = 'auto';
+                        audio.playsInline = true;
                     }
-                    audio.preload = 'auto';
-                    audio.playsInline = true;
-                    audio.load();
                 } catch (e) {
                     this.warn('effect load failed', e && e.message ? e.message : e);
                 }
@@ -695,9 +711,12 @@
                         audio.onended = () => done('ended');
                         audio.onerror = () => done('error');
                         try {
-                            audio.pause();
+                            if (typeof audio.paused === 'boolean' && !audio.paused) {
+                                audio.pause();
+                            }
                         } catch (e) {}
                         try {
+                            // Seek without load() — load() after unlock breaks Samsung autoplay grant.
                             if (audio.readyState >= 1) {
                                 audio.currentTime = 0;
                             }
@@ -718,6 +737,8 @@
                     }
                 };
 
+                // Do not call audio.load() here — it resets the element and can void the
+                // unmuted unlock from "Ativar som" on Tizen/Samsung browsers.
                 if (audio.readyState >= 2) {
                     startPlay();
                     return;
@@ -730,14 +751,11 @@
                 };
                 audio.addEventListener('canplay', onReady);
                 audio.addEventListener('loadeddata', onReady);
-                try {
-                    audio.load();
-                } catch (e) {}
                 setTimeout(() => {
                     if (!settled) {
                         startPlay();
                     }
-                }, 2000);
+                }, 1500);
             },
 
             async playChime(panel) {

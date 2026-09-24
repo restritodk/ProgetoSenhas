@@ -3,7 +3,8 @@
         Alpine owns the playback surface. wire:ignore + TvDisplay @island(tv-media)
         prevent TicketCall / feed morphs from destroying <video>/YouTube.
         Playlist changes arrive via tv-playlist-updated (only when signature changes).
-        TicketCall audio stays isolated: announcements do not pause, mute-duck, remount, or advance this player.
+        Call effect (EfeitoSonoroTV) is independent: may briefly mute-duck COM ÁUDIO, then restores playlist config.
+        SEM ÁUDIO stays muted; no pause, remount, or playlist advance.
     --}}
     <div
         wire:ignore
@@ -89,6 +90,7 @@
             imageTimerStartedFor: null,
             playbackToken: 0,
             advancing: false,
+            callDucked: false,
             autoplayAudioBlocked: false,
             clinicLabel: @js($clinicName !== '' ? $clinicName : config('app.name')),
             get hasItems() {
@@ -108,7 +110,7 @@
             },
             get showAudioHint() {
                 const item = this.current;
-                if (!item || !item.play_with_audio) {
+                if (!item || !this.itemWantsAudio(item) || this.callDucked) {
                     return false;
                 }
                 return this.autoplayAudioBlocked;
@@ -128,14 +130,53 @@
             youtubeHost() {
                 return this.$root.querySelector('[data-youtube-host]');
             },
+            /**
+             * MEDIA AUDIO config only (playlist play_with_audio).
+             * Independent from call-effect "Ativar som" / soundEnabled.
+             */
             itemWantsAudio(item = null) {
                 const target = item || this.current;
-                return !!(target && target.play_with_audio);
+                return !!(target && target.play_with_audio === true);
             },
-            // MEDIA AUDIO: driven only by play_with_audio.
-            // TicketCall / announcement audio is fully independent (no pause, mute-duck, or remount).
+            // Temporary duck during call effect; restore uses play_with_audio only (SEM ÁUDIO stays muted).
             shouldPlayWithAudio(item = null) {
-                return this.itemWantsAudio(item);
+                return this.itemWantsAudio(item) && !this.callDucked;
+            },
+            /**
+             * Safety net: Smart TVs may auto-unmute YouTube when EfeitoSonoroTV plays.
+             * Only forces mute for SEM ÁUDIO — does not unMute COM ÁUDIO.
+             */
+            enforceConfiguredMute() {
+                const item = this.current;
+                if (!item || this.itemWantsAudio(item)) {
+                    return;
+                }
+
+                if (item.type === 'video') {
+                    const video = this.$refs.localVideo;
+                    if (video) {
+                        video.muted = true;
+                    }
+                    return;
+                }
+
+                if (item.type === 'youtube' && this.ytPlayer) {
+                    try {
+                        this.ytPlayer.mute();
+                        if (typeof this.ytPlayer.setVolume === 'function') {
+                            this.ytPlayer.setVolume(0);
+                        }
+                    } catch (e) {}
+                }
+            },
+            /**
+             * End of call effect: restore media audio to playlist config only.
+             * SEM ÁUDIO → muted; COM ÁUDIO → unmuted. Do not unMute Sem áudio.
+             */
+            restoreMediaAudioAfterCall() {
+                this.callDucked = false;
+                this.applyMediaAudio();
+                this.enforceConfiguredMute();
             },
             playlistFingerprint(items) {
                 return JSON.stringify(Array.isArray(items) ? items : []);
@@ -368,9 +409,11 @@
                             if (typeof this.ytPlayer.setVolume === 'function') {
                                 this.ytPlayer.setVolume(100);
                             }
-                            this.ytPlayer.playVideo();
                         } else {
                             this.ytPlayer.mute();
+                            if (typeof this.ytPlayer.setVolume === 'function') {
+                                this.ytPlayer.setVolume(0);
+                            }
                             this.autoplayAudioBlocked = false;
                         }
                     } catch (e) {}
@@ -708,6 +751,9 @@
                                     } else {
                                         try {
                                             event.target.mute();
+                                            if (typeof event.target.setVolume === 'function') {
+                                                event.target.setVolume(0);
+                                            }
                                         } catch (e) {}
                                     }
                                 }
@@ -730,86 +776,26 @@
                 });
             },
             init() {
-                // TicketCall audio (bip / speech / EfeitoSonoroTV) stays isolated from this player:
-                // no pause, mute-duck, remount, or playlist advance on announcement events.
-                // Browsers (esp. YouTube iframe) may still auto-pause when call audio starts —
-                // resume playback only; do not duck or pause ourselves.
-                this._onCallAudioBegin = () => {
-                    this.scheduleSoftResume(400);
-                    this.scheduleSoftResume(1200);
+                // Temporary mute-duck during call effect only — no pause/remount/playlist advance.
+                // Restore uses play_with_audio === true (SEM ÁUDIO stays muted; COM ÁUDIO may unmute).
+                this._onCallBegin = () => {
+                    this.callDucked = true;
+                    this.applyMediaAudio();
+                    this.enforceConfiguredMute();
                 };
-                this._onCallAudioEnd = () => {
-                    this.resumeCurrentPlayback();
-                    this.scheduleSoftResume(300);
+                this._onCallEnd = () => {
+                    this.restoreMediaAudioAfterCall();
                 };
-                window.addEventListener('tv-call-audio-begin', this._onCallAudioBegin);
-                window.addEventListener('tv-call-audio-end', this._onCallAudioEnd);
+                window.addEventListener('tv-call-audio-begin', this._onCallBegin);
+                window.addEventListener('tv-call-audio-end', this._onCallEnd);
                 this.$nextTick(() => this.activateCurrent());
             },
             destroy() {
-                if (this._onCallAudioBegin) {
-                    window.removeEventListener('tv-call-audio-begin', this._onCallAudioBegin);
+                if (this._onCallBegin) {
+                    window.removeEventListener('tv-call-audio-begin', this._onCallBegin);
                 }
-                if (this._onCallAudioEnd) {
-                    window.removeEventListener('tv-call-audio-end', this._onCallAudioEnd);
-                }
-                if (this._softResumeTimers) {
-                    this._softResumeTimers.forEach((id) => clearTimeout(id));
-                    this._softResumeTimers = [];
-                }
-            },
-            scheduleSoftResume(delayMs) {
-                if (!this._softResumeTimers) {
-                    this._softResumeTimers = [];
-                }
-                const id = setTimeout(() => {
-                    this.resumeCurrentPlayback();
-                }, delayMs);
-                this._softResumeTimers.push(id);
-            },
-            resumeCurrentPlayback() {
-                const item = this.current;
-                if (!item || this.advancing) {
-                    return;
-                }
-
-                if (item.type === 'video') {
-                    const video = this.$refs.localVideo;
-                    if (video && video.paused) {
-                        const start = video.play();
-                        if (start && typeof start.then === 'function') {
-                            start.catch(() => {}).finally(() => this.applyMediaAudio());
-                        } else {
-                            this.applyMediaAudio();
-                        }
-                    }
-                    return;
-                }
-
-                if (item.type === 'youtube') {
-                    if (!this.ytPlayer || this.ytMountedId !== item.id) {
-                        this.mountYouTube(item);
-                        return;
-                    }
-                    try {
-                        const YT = window.YT;
-                        const state = typeof this.ytPlayer.getPlayerState === 'function'
-                            ? this.ytPlayer.getPlayerState()
-                            : null;
-                        // -1 unstarted, 2 paused, 5 cued — resume without remount.
-                        if (
-                            state === null
-                            || state === -1
-                            || (YT && (state === YT.PlayerState.PAUSED || state === YT.PlayerState.CUED))
-                            || state === 2
-                            || state === 5
-                        ) {
-                            this.ytPlayer.playVideo();
-                        }
-                        this.applyMediaAudio();
-                    } catch (e) {
-                        this.mountYouTube(item);
-                    }
+                if (this._onCallEnd) {
+                    window.removeEventListener('tv-call-audio-end', this._onCallEnd);
                 }
             },
         };

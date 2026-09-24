@@ -108,6 +108,57 @@ class ClinicSettingsTvIntegrationTest extends TestCase
             ->assertDontSee('Painel de chamadas');
     }
 
+    public function test_tv_footer_band_uses_clinic_brand_colors_without_oklab_gradient(): void
+    {
+        $clinicA = Clinic::factory()->create();
+        $unitA = Unit::factory()->for($clinicA)->create();
+        $panelA = DisplayPanel::factory()->create([
+            'clinic_id' => $clinicA->id,
+            'unit_id' => $unitA->id,
+            'active' => true,
+        ]);
+
+        $clinicB = Clinic::factory()->create();
+        $unitB = Unit::factory()->for($clinicB)->create();
+        $panelB = DisplayPanel::factory()->create([
+            'clinic_id' => $clinicB->id,
+            'unit_id' => $unitB->id,
+            'active' => true,
+        ]);
+
+        app(ClinicSettings::class)->putMany($clinicA, [
+            'primary_color' => '#1E3A5F',
+            'accent_color' => '#2563EB',
+        ]);
+        app(ClinicSettings::class)->putMany($clinicB, [
+            'primary_color' => '#7C2D12',
+            'accent_color' => '#EA580C',
+        ]);
+
+        $feedA = app(DisplayPanelFeed::class)->build($panelA->fresh(['clinic', 'unit']));
+        $feedB = app(DisplayPanelFeed::class)->build($panelB->fresh(['clinic', 'unit']));
+
+        $this->assertSame('#1E3A5F', strtoupper((string) $feedA['presentation']['primary_color']));
+        $this->assertSame('#2563EB', strtoupper((string) $feedA['presentation']['accent_color']));
+        $this->assertSame('#7C2D12', strtoupper((string) $feedB['presentation']['primary_color']));
+        $this->assertSame('#EA580C', strtoupper((string) $feedB['presentation']['accent_color']));
+
+        $htmlA = $this->get(route('tv.panel', $panelA->public_token))->assertOk()->getContent();
+        $htmlB = $this->get(route('tv.panel', $panelB->public_token))->assertOk()->getContent();
+
+        $this->assertStringContainsString('linear-gradient(to right', $htmlA);
+        $this->assertStringContainsString('#2563EB', strtoupper($htmlA));
+        $this->assertStringContainsString('#1E3A5F', strtoupper($htmlA));
+        $this->assertStringNotContainsString('bg-gradient-to-r', $htmlA);
+        $this->assertStringNotContainsString('from-success', $htmlA);
+        $this->assertStringNotContainsString('via-accent', $htmlA);
+        $this->assertStringNotContainsString('in oklab', $htmlA);
+
+        $this->assertStringContainsString('#EA580C', strtoupper($htmlB));
+        $this->assertStringContainsString('#7C2D12', strtoupper($htmlB));
+        $this->assertStringNotContainsString('#2563EB', strtoupper($htmlB));
+    }
+
     private function attendant(Clinic $clinic, Unit $unit): User
     {
         $user = User::factory()->create([

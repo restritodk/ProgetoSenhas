@@ -72,7 +72,7 @@ class DisplayPanelPlaylist
                         'url' => $videoId !== null ? YouTubeUrl::embedUrl($videoId, $origin) : null,
                         'video_id' => $videoId,
                         'duration_seconds' => 0,
-                        'play_with_audio' => $media->playsWithAudio(),
+                        'play_with_audio' => (bool) $media->playsWithAudio(),
                         'mime_type' => null,
                     ];
                 }
@@ -91,7 +91,7 @@ class DisplayPanelPlaylist
                                 : null
                         )
                         : 0,
-                    'play_with_audio' => $media->playsWithAudio(),
+                    'play_with_audio' => (bool) $media->playsWithAudio(),
                     'mime_type' => $media->mime_type,
                 ];
             })
