@@ -215,23 +215,23 @@
                         <h2 class="text-xs font-bold uppercase tracking-[0.18em] text-white sm:text-sm sm:tracking-[0.22em] md:text-base lg:text-lg">Senha atual</h2>
                     </div>
 
-                    <div class="flex min-h-0 flex-1 flex-col items-center justify-center px-3 py-2 text-center sm:px-6 sm:py-4">
+                    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-3 py-3 text-center sm:gap-3 sm:px-5 sm:py-5 md:gap-3.5 md:px-6 md:py-6">
                         @if ($currentCall)
-                            <p class="tv-code {{ $highlight ? 'tv-code-pulse' : '' }} font-bold leading-none tracking-tight text-danger">
+                            <p class="tv-code {{ $highlight ? 'tv-code-pulse' : '' }} w-full font-bold tracking-tight text-danger">
                                 {{ $currentCall['display_code'] }}
                             </p>
-                            <div class="my-2 h-0.5 w-12 bg-danger/50 sm:my-3 sm:w-16 md:my-4 md:w-24" aria-hidden="true"></div>
+                            <div class="h-0.5 w-14 shrink-0 bg-danger/50 sm:w-20 md:w-28" aria-hidden="true"></div>
                             <p class="tv-desk font-bold uppercase tracking-wide text-primary">
                                 {{ $currentCall['desk_name'] }}
                             </p>
                             @if ($showTicketType)
-                                <p class="mt-1 text-xs font-medium text-text-muted sm:mt-2 sm:text-sm md:text-base">
+                                <p class="text-[0.7rem] font-medium leading-snug text-text-muted sm:text-sm md:text-base">
                                     {{ $currentCall['ticket_type_name'] }}
                                 </p>
                             @endif
                         @else
-                            <p class="tv-code font-bold leading-none text-primary/30">—</p>
-                            <div class="my-2 h-0.5 w-12 bg-border sm:my-3 sm:w-16 md:my-4" aria-hidden="true"></div>
+                            <p class="tv-code w-full font-bold text-primary/30">—</p>
+                            <div class="h-0.5 w-14 shrink-0 bg-border sm:w-20" aria-hidden="true"></div>
                             <p class="text-sm font-semibold uppercase tracking-wide text-text-muted sm:text-lg md:text-xl">Aguardando chamada</p>
                         @endif
                     </div>
