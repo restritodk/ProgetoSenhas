@@ -22,6 +22,7 @@ class KioskFactory extends Factory
             'name' => 'Totem '.$this->faker->unique()->numerify('##'),
             'code' => 'K'.$this->faker->unique()->numerify('##'),
             'public_token' => Kiosk::generatePublicToken(),
+            'public_code' => Kiosk::generatePublicCode(),
             'active' => true,
             'print_enabled' => false,
             'print_agent_port' => 17321,

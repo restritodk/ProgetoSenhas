@@ -118,10 +118,35 @@
                                         <button
                                             type="button"
                                             class="inline-flex min-h-9 w-fit cursor-pointer items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-text hover:bg-background"
-                                            x-data
-                                            @click="navigator.clipboard.writeText(@js($panel->publicUrl())); $wire.markUrlCopied({{ $panel->id }})"
+                                            x-data="{
+                                                label: 'Copiar URL',
+                                                async copy(text) {
+                                                    try {
+                                                        if (navigator.clipboard && window.isSecureContext) {
+                                                            await navigator.clipboard.writeText(text);
+                                                        } else {
+                                                            const ta = document.createElement('textarea');
+                                                            ta.value = text;
+                                                            ta.setAttribute('readonly', '');
+                                                            ta.style.position = 'fixed';
+                                                            ta.style.left = '-9999px';
+                                                            document.body.appendChild(ta);
+                                                            ta.select();
+                                                            document.execCommand('copy');
+                                                            document.body.removeChild(ta);
+                                                        }
+                                                        this.label = 'Copiado';
+                                                        $wire.markUrlCopied({{ $panel->id }});
+                                                        setTimeout(() => { this.label = 'Copiar URL' }, 2000);
+                                                    } catch (e) {
+                                                        this.label = 'Falha ao copiar';
+                                                        setTimeout(() => { this.label = 'Copiar URL' }, 2500);
+                                                    }
+                                                }
+                                            }"
+                                            @click="copy(@js($panel->publicUrl()))"
                                         >
-                                            {{ (string) $copiedUrlPanelId === (string) $panel->id ? 'Copiado' : 'Copiar URL' }}
+                                            <span x-text="label">{{ (string) $copiedUrlPanelId === (string) $panel->id ? 'Copiado' : 'Copiar URL' }}</span>
                                         </button>
                                     </div>
                                 </td>
@@ -138,7 +163,7 @@
                                         <a href="{{ route('display-panels.playlist', $panel) }}" class="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-text transition duration-200 hover:bg-background">
                                             Gerenciar playlist
                                         </a>
-                                        <x-ui.button variant="secondary" wire:click="confirmTokenRegen({{ $panel->id }})">Regenerar token</x-ui.button>
+                                        <x-ui.button variant="secondary" wire:click="confirmTokenRegen({{ $panel->id }})">Regenerar link</x-ui.button>
                                         @if ($panel->active)
                                             <x-ui.button variant="danger" wire:click="confirmDeactivation({{ $panel->id }})">Desativar</x-ui.button>
                                         @else
@@ -163,8 +188,8 @@
         </x-slot:actions>
     </x-ui.modal>
 
-    <x-ui.modal title="Regenerar token de acesso" :open="$panelPendingTokenRegenId !== null">
-        <p>A URL pública atual deixará de funcionar imediatamente. Será necessário atualizar o endereço na TV.</p>
+    <x-ui.modal title="Regenerar link público" :open="$panelPendingTokenRegenId !== null">
+        <p>A URL pública atual (código curto e token legado) deixará de funcionar imediatamente. Será necessário atualizar o endereço na TV.</p>
         <x-slot:actions>
             <x-ui.button variant="secondary" wire:click="cancelTokenRegen">Cancelar</x-ui.button>
             <x-ui.button variant="danger" wire:click="regenerateToken" wire:loading.attr="disabled">Regenerar</x-ui.button>

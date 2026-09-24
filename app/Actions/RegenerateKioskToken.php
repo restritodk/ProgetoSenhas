@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Gate;
 
 class RegenerateKioskToken
 {
+    /**
+     * Rotates the public short code and the long internal token.
+     * Previous short and legacy URLs stop resolving.
+     */
     public function handle(User $actor, Kiosk $kiosk): Kiosk
     {
         abort_if($kiosk->clinic_id !== $actor->clinic_id, 404);
@@ -15,6 +19,7 @@ class RegenerateKioskToken
 
         $kiosk->forceFill([
             'public_token' => Kiosk::generatePublicToken(),
+            'public_code' => Kiosk::generatePublicCode(),
         ])->save();
 
         return $kiosk->refresh();

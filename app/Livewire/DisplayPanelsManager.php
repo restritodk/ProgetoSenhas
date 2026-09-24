@@ -241,7 +241,7 @@ class DisplayPanelsManager extends Component
         $regenerateDisplayPanelToken->handle($actor, $panel);
 
         $this->panelPendingTokenRegenId = null;
-        $this->statusMessage = 'Token do painel regenerado. A URL anterior deixou de funcionar.';
+        $this->statusMessage = 'Link público regenerado. A URL anterior deixou de funcionar.';
         $this->resetPage();
     }
 

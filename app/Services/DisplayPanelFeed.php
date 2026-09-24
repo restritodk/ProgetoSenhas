@@ -19,7 +19,16 @@ class DisplayPanelFeed
 
     public function findByPublicToken(string $publicToken): ?DisplayPanel
     {
-        if ($publicToken === '' || strlen($publicToken) < 32) {
+        return $this->findByPublicIdentifier($publicToken);
+    }
+
+    /**
+     * Resolve by short public_code or legacy public_token.
+     * Does not accept numeric IDs.
+     */
+    public function findByPublicIdentifier(string $identifier): ?DisplayPanel
+    {
+        if ($identifier === '' || strlen($identifier) < 8) {
             return null;
         }
 
@@ -29,7 +38,10 @@ class DisplayPanelFeed
                 'unit:id,clinic_id,name,active',
                 'sectors:id,clinic_id,unit_id,name,active',
             ])
-            ->where('public_token', $publicToken)
+            ->where(function ($query) use ($identifier): void {
+                $query->where('public_code', $identifier)
+                    ->orWhere('public_token', $identifier);
+            })
             ->first();
     }
 

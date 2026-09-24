@@ -36,6 +36,7 @@ class CreateDisplayPanel
                 'name' => $attributes['name'],
                 'code' => Str::upper($attributes['code']),
                 'public_token' => DisplayPanel::generatePublicToken(),
+                'public_code' => DisplayPanel::generatePublicCode(),
                 'active' => $attributes['active'],
             ])->save();
 

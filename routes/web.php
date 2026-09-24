@@ -24,6 +24,7 @@ use App\Http\Controllers\TicketTypeController;
 use App\Http\Controllers\TvPanelController;
 use App\Http\Controllers\UnitTicketTypeController;
 use App\Http\Controllers\UserController;
+use App\Support\PublicAccessCode;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/login');
@@ -36,12 +37,12 @@ Route::middleware('guest')->group(function (): void {
 });
 
 Route::get('/painel/{publicToken}', TvPanelController::class)
-    ->where('publicToken', '[A-Za-z0-9]{32,64}')
-    ->middleware('throttle:60,1')
+    ->where('publicToken', PublicAccessCode::panelRoutePattern())
+    ->middleware('throttle:tv-page')
     ->name('tv.panel');
 
 Route::get('/totem/{publicToken}', KioskPanelController::class)
-    ->where('publicToken', '[A-Za-z0-9]{32,64}')
+    ->where('publicToken', PublicAccessCode::kioskRoutePattern())
     ->middleware('throttle:kiosk-page')
     ->name('kiosk.panel');
 

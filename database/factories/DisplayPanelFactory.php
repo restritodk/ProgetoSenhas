@@ -20,6 +20,7 @@ class DisplayPanelFactory extends Factory
             'name' => 'TV '.fake()->unique()->words(2, true),
             'code' => 'TV'.fake()->unique()->numerify('##'),
             'public_token' => DisplayPanel::generatePublicToken(),
+            'public_code' => DisplayPanel::generatePublicCode(),
             'active' => true,
         ];
     }

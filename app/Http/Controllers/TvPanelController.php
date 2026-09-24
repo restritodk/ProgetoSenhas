@@ -8,9 +8,13 @@ use Illuminate\View\View;
 
 class TvPanelController extends Controller
 {
+    /**
+     * Accepts short public_code or legacy public_token.
+     * Livewire keeps using the long public_token so polling stays stable.
+     */
     public function __invoke(string $publicToken, DisplayPanelFeed $feed): View|Response
     {
-        $panel = $feed->findByPublicToken($publicToken);
+        $panel = $feed->findByPublicIdentifier($publicToken);
 
         if ($panel === null) {
             abort(404);

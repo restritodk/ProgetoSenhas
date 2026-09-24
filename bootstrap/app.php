@@ -26,6 +26,11 @@ return Application::configure(basePath: dirname(__DIR__))
             RateLimiter::for('kiosk-page', function (Request $request): Limit {
                 return Limit::perMinute(120)->by($request->ip());
             });
+
+            // TV polling (~3s) + media (~45s); allow headroom without aiding brute-force of short codes.
+            RateLimiter::for('tv-page', function (Request $request): Limit {
+                return Limit::perMinute(120)->by($request->ip());
+            });
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

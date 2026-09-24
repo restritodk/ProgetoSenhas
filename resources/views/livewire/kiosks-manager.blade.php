@@ -277,10 +277,35 @@
                                         <button
                                             type="button"
                                             class="inline-flex min-h-9 w-fit cursor-pointer items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-text hover:bg-background"
-                                            x-data
-                                            @click="navigator.clipboard.writeText(@js($kiosk->publicUrl())); $wire.markUrlCopied({{ $kiosk->id }})"
+                                            x-data="{
+                                                label: 'Copiar URL',
+                                                async copy(text) {
+                                                    try {
+                                                        if (navigator.clipboard && window.isSecureContext) {
+                                                            await navigator.clipboard.writeText(text);
+                                                        } else {
+                                                            const ta = document.createElement('textarea');
+                                                            ta.value = text;
+                                                            ta.setAttribute('readonly', '');
+                                                            ta.style.position = 'fixed';
+                                                            ta.style.left = '-9999px';
+                                                            document.body.appendChild(ta);
+                                                            ta.select();
+                                                            document.execCommand('copy');
+                                                            document.body.removeChild(ta);
+                                                        }
+                                                        this.label = 'Copiado';
+                                                        $wire.markUrlCopied({{ $kiosk->id }});
+                                                        setTimeout(() => { this.label = 'Copiar URL' }, 2000);
+                                                    } catch (e) {
+                                                        this.label = 'Falha ao copiar';
+                                                        setTimeout(() => { this.label = 'Copiar URL' }, 2500);
+                                                    }
+                                                }
+                                            }"
+                                            @click="copy(@js($kiosk->publicUrl()))"
                                         >
-                                            {{ (string) $copiedUrlKioskId === (string) $kiosk->id ? 'Copiado' : 'Copiar URL' }}
+                                            <span x-text="label">{{ (string) $copiedUrlKioskId === (string) $kiosk->id ? 'Copiado' : 'Copiar URL' }}</span>
                                         </button>
                                     </div>
                                 </td>
@@ -294,7 +319,7 @@
                                 <td class="px-3 py-3">
                                     <div class="flex flex-wrap gap-2">
                                         <x-ui.button variant="secondary" wire:click="edit({{ $kiosk->id }})">Editar</x-ui.button>
-                                        <x-ui.button variant="secondary" wire:click="confirmTokenRegen({{ $kiosk->id }})">Regenerar token</x-ui.button>
+                                        <x-ui.button variant="secondary" wire:click="confirmTokenRegen({{ $kiosk->id }})">Regenerar link</x-ui.button>
                                         @if ($kiosk->active)
                                             <x-ui.button variant="danger" wire:click="confirmDeactivation({{ $kiosk->id }})">Desativar</x-ui.button>
                                         @else
@@ -319,8 +344,8 @@
         </x-slot:actions>
     </x-ui.modal>
 
-    <x-ui.modal title="Regenerar token de acesso" :open="$kioskPendingTokenRegenId !== null">
-        <p>A URL pública atual deixará de funcionar imediatamente. Será necessário atualizar o endereço no dispositivo.</p>
+    <x-ui.modal title="Regenerar link público" :open="$kioskPendingTokenRegenId !== null">
+        <p>A URL pública atual (código curto e token legado) deixará de funcionar imediatamente. Será necessário atualizar o endereço no dispositivo.</p>
         <x-slot:actions>
             <x-ui.button variant="secondary" wire:click="cancelTokenRegen">Cancelar</x-ui.button>
             <x-ui.button variant="danger" wire:click="regenerateToken" wire:loading.attr="disabled">Regenerar</x-ui.button>

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\PublicAccessCode;
 use Database\Factories\KioskFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -61,9 +62,20 @@ class Kiosk extends Model
         return Str::lower(Str::random(64));
     }
 
+    public static function generatePublicCode(): string
+    {
+        return PublicAccessCode::generateUniqueForTable(
+            PublicAccessCode::KIOSK_PREFIX,
+            'kiosks',
+        );
+    }
+
+    /**
+     * Canonical public URL (short code). Uses APP_URL / route() — never hardcodes host.
+     */
     public function publicUrl(): string
     {
-        return route('kiosk.panel', ['publicToken' => $this->public_token]);
+        return route('kiosk.panel', ['publicToken' => $this->public_code ?: $this->public_token]);
     }
 
     public function isOperationallyAvailable(): bool

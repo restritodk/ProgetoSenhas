@@ -436,13 +436,13 @@ class ClinicSettingsManager extends Component
             ->where('active', true)
             ->orderBy('id')
             ->first();
-        $this->previewTvUrl = $panel ? route('tv.panel', $panel->public_token) : null;
+        $this->previewTvUrl = $panel?->publicUrl();
 
         $kiosk = Kiosk::query()
             ->where('clinic_id', $clinic->id)
             ->where('active', true)
             ->orderBy('id')
             ->first();
-        $this->previewKioskUrl = $kiosk ? route('kiosk.panel', $kiosk->public_token) : null;
+        $this->previewKioskUrl = $kiosk?->publicUrl();
     }
 }

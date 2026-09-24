@@ -444,7 +444,7 @@ class KiosksManager extends Component
         $regenerateKioskToken->handle($actor, $kiosk);
 
         $this->kioskPendingTokenRegenId = null;
-        $this->statusMessage = 'Token do totem regenerado. A URL anterior deixou de funcionar.';
+        $this->statusMessage = 'Link público regenerado. A URL anterior deixou de funcionar.';
         $this->resetPage();
     }
 

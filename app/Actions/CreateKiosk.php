@@ -35,6 +35,7 @@ class CreateKiosk
             'name' => $attributes['name'],
             'code' => Str::upper($attributes['code']),
             'public_token' => Kiosk::generatePublicToken(),
+            'public_code' => Kiosk::generatePublicCode(),
             'active' => $attributes['active'],
         ])->save();
 

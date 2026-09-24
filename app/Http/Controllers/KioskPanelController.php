@@ -8,18 +8,25 @@ use Illuminate\View\View;
 
 class KioskPanelController extends Controller
 {
+    /**
+     * Accepts short public_code or legacy public_token.
+     * Livewire keeps using the long public_token so emission/print stays stable.
+     */
     public function __invoke(string $publicToken): View|Response
     {
-        $exists = Kiosk::query()
-            ->where('public_token', $publicToken)
-            ->exists();
+        $kiosk = Kiosk::query()
+            ->where(function ($query) use ($publicToken): void {
+                $query->where('public_code', $publicToken)
+                    ->orWhere('public_token', $publicToken);
+            })
+            ->first();
 
-        if (! $exists) {
+        if ($kiosk === null) {
             abort(404);
         }
 
         return view('kiosk.show', [
-            'publicToken' => $publicToken,
+            'publicToken' => $kiosk->public_token,
         ]);
     }
 }

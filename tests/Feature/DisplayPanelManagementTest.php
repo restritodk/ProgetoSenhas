@@ -165,7 +165,7 @@ class DisplayPanelManagementTest extends TestCase
             ->test(DisplayPanelsManager::class)
             ->call('confirmTokenRegen', $panel->id)
             ->call('regenerateToken')
-            ->assertSee('Token do painel regenerado');
+            ->assertSee('Link público regenerado');
 
         $panel->refresh();
         $this->assertNotSame($oldToken, $panel->public_token);
