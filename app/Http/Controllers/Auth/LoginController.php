@@ -4,22 +4,27 @@ namespace App\Http\Controllers\Auth;
 
 use App\Actions\ReleaseDesk;
 use App\Http\Controllers\Controller;
+use App\Services\ClinicBranding;
+use App\Services\ClinicSettings;
 use App\Services\UserPresence;
-use Illuminate\Http\RedirectResponse;
+use App\Support\AuthSessionFeedback;
+use App\Support\LoginPresentation;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Illuminate\View\View;
 
 class LoginController extends Controller
 {
-    public function create(): View
+    public function create(ClinicBranding $branding, ClinicSettings $settings): View
     {
-        return view('auth.login');
+        return view('auth.login', [
+            'loginBranding' => LoginPresentation::forGuest($branding, $settings),
+        ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request): View
     {
         $credentials = $request->validate([
             'email' => ['required', 'email:rfc'],
@@ -33,22 +38,36 @@ class LoginController extends Controller
                 'email' => 'Não foi possível autenticar com essas credenciais.',
             ]);
         }
+
         $request->session()->regenerate();
 
         $user = Auth::user();
 
-        if ($user?->isAttendant()) {
-            return redirect()->route('attendant.panel');
+        if ($user === null || ! $user->active) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            throw ValidationException::withMessages([
+                'email' => 'Não foi possível autenticar com essas credenciais.',
+            ]);
         }
 
-        $destination = $user?->canAccessAttendantPanel() && ! $user->isAdministrator() && ! $user->isSupervisor()
-            ? route('attendant.panel')
-            : route('dashboard');
+        if ($user->isAttendant()) {
+            $destination = route('attendant.panel');
+        } else {
+            $destination = $user->canAccessAttendantPanel() && ! $user->isAdministrator() && ! $user->isSupervisor()
+                ? route('attendant.panel')
+                : route('dashboard');
+        }
 
-        return redirect()->intended($destination);
+        $intended = $request->session()->pull('url.intended');
+        $redirectUrl = is_string($intended) && $intended !== '' ? $intended : $destination;
+
+        return AuthSessionFeedback::login($user, $redirectUrl);
     }
 
-    public function destroy(Request $request, UserPresence $presence, ReleaseDesk $releaseDesk): RedirectResponse
+    public function destroy(Request $request, UserPresence $presence, ReleaseDesk $releaseDesk): View
     {
         $user = Auth::user();
 
@@ -61,6 +80,6 @@ class LoginController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect()->route('login');
+        return AuthSessionFeedback::logout(route('login'));
     }
 }

@@ -56,7 +56,7 @@ class DeskLeaseLifecycleTest extends TestCase
             'user_id' => $juliane->id,
         ]);
 
-        $this->post(route('logout'))->assertRedirect(route('login'));
+        $this->assertLoggedOutFeedback($this->post(route('logout')));
         $this->assertGuest();
         $this->assertDatabaseMissing('desk_assignments', [
             'desk_id' => $desk->id,
@@ -291,7 +291,7 @@ class DeskLeaseLifecycleTest extends TestCase
         ]);
 
         $this->actingAs($user);
-        $this->post(route('logout'))->assertRedirect(route('login'));
+        $this->assertLoggedOutFeedback($this->post(route('logout')));
         $this->assertGuest();
     }
 

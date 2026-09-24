@@ -46,7 +46,8 @@ class AttendantAreaEvolutionTest extends TestCase
             'password' => 'password',
         ]);
 
-        $response->assertRedirect(route('attendant.panel'));
+        $this->assertAuthenticatedLoginFeedback($response, route('attendant.panel'));
+        $this->assertAuthenticatedAs($attendant);
     }
 
     public function test_admin_login_redirects_to_dashboard(): void
@@ -58,7 +59,8 @@ class AttendantAreaEvolutionTest extends TestCase
             'password' => 'password',
         ]);
 
-        $response->assertRedirect(route('dashboard'));
+        $this->assertAuthenticatedLoginFeedback($response, route('dashboard'));
+        $this->assertAuthenticatedAs($admin);
     }
 
     public function test_attendant_is_blocked_from_admin_dashboard(): void

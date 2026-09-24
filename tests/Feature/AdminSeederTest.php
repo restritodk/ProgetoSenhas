@@ -34,11 +34,12 @@ class AdminSeederTest extends TestCase
     {
         $this->app->make(AdminSeeder::class)->run();
 
-        $this->post('/login', [
+        $response = $this->post('/login', [
             'email' => 'admin@example.test',
             'password' => 'secret-password',
-        ])->assertRedirect('/dashboard');
+        ]);
 
+        $this->assertAuthenticatedLoginFeedback($response, route('dashboard'));
         $this->assertAuthenticated();
     }
 

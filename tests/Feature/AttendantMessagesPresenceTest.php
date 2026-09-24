@@ -398,9 +398,8 @@ class AttendantMessagesPresenceTest extends TestCase
         app(UserPresence::class)->touch($actor);
         $this->assertTrue(app(UserPresence::class)->isOnline($actor->fresh()));
 
-        $this->actingAs($actor)
-            ->post(route('logout'))
-            ->assertRedirect(route('login'));
+        $this->actingAs($actor);
+        $this->assertLoggedOutFeedback($this->post(route('logout')));
 
         $this->assertNull($actor->fresh()->last_seen_at);
         $this->assertFalse(app(UserPresence::class)->isOnline($actor->fresh()));
