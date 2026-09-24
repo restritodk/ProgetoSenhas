@@ -94,7 +94,7 @@ class TvDisplay extends Component
                 );
 
                 // Deliver AFTER DOM morph so Alpine remounts cannot swallow the announce.
-                // Dedup / playback state is per browser tab + panel token (never global consume).
+                // Dedup / playback state is per browser tab + panel token (no global consume).
                 $this->js(
                     'window.__humanaTvCallAudio && window.__humanaTvCallAudio.announce('
                     .json_encode([

@@ -19,6 +19,9 @@
     $logoBackground = \App\Support\LogoSurface::normalizeMode($p['logo_background'] ?? 'transparent');
     $logoBackgroundColor = \App\Support\LogoSurface::normalizeColor($p['logo_background_color'] ?? '#FFFFFF');
     $logoSurfaceCss = \App\Support\LogoSurface::cssBackground($logoBackground, $logoBackgroundColor);
+    $isSmartTv = \App\Support\SmartTvBrowser::matches(request()->userAgent());
+    $smartTvEffectUrl = asset('sond/EfeitoSonoroTV.mp3');
+    $tvAudioDebug = (bool) config('app.debug');
 @endphp
 <div
     wire:poll.3s="refreshFeed"
@@ -29,10 +32,13 @@
         'chimeEnabled' => $chimeEnabled,
         'speechEnabled' => $speechEnabled,
         'chimeVolume' => $chimeVolume,
+        'isSmartTv' => $isSmartTv,
+        'effectUrl' => $smartTvEffectUrl,
+        'audioDebug' => $tvAudioDebug,
     ]))"
     x-init="init()"
 >
-    {{-- Stable audio host: never remounted by Livewire morphs that update calls / highlight. --}}
+    {{-- Stable audio host: remount avoided so Livewire morphs that update calls / highlight keep audio state. --}}
     <div
         wire:ignore
         class="hidden"
@@ -42,8 +48,19 @@
             'chimeEnabled' => $chimeEnabled,
             'speechEnabled' => $speechEnabled,
             'chimeVolume' => $chimeVolume,
+            'isSmartTv' => $isSmartTv,
+            'effectUrl' => $smartTvEffectUrl,
+            'audioDebug' => $tvAudioDebug,
         ])))"
-    ></div>
+    >
+        @if ($isSmartTv)
+            <audio
+                data-tv-call-effect
+                preload="auto"
+                src="{{ $smartTvEffectUrl }}"
+            ></audio>
+        @endif
+    </div>
     {{-- HEADER --}}
     <header class="tv-header flex shrink-0 items-center justify-between gap-2 border-b-4 border-primary bg-primary px-[max(0.75rem,var(--tv-pad))] sm:gap-4 sm:px-5 lg:px-8" style="color: {{ $onPrimary }};">
         <div class="flex min-w-0 max-w-[55%] items-center lg:max-w-[60%]">
@@ -309,13 +326,68 @@
         }
 
         const storageKey = (token) => 'tvCallAudioUnlocked:' + token;
+        const DEFAULT_EFFECT_URL = '/sond/EfeitoSonoroTV.mp3';
 
         window.__humanaTvCallAudio = {
             panels: Object.create(null),
+            debug: false,
+
+            /**
+             * Central Smart TV detection. Keep aligned with App\Support\SmartTvBrowser.
+             * Does not treat mobile SamsungBrowser alone as a Smart TV.
+             */
+            isSmartTvBrowser(userAgent) {
+                const ua = String(userAgent || (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '');
+                if (!ua) {
+                    return false;
+                }
+                if (/\bTizen\b/i.test(ua)) {
+                    return true;
+                }
+                if (/SMART[\s_-]?TV/i.test(ua)) {
+                    return true;
+                }
+                if (/\bSmartTV\b/i.test(ua)) {
+                    return true;
+                }
+                if (/\bHbbTV\b/i.test(ua)) {
+                    return true;
+                }
+                if (/\bWeb0S\b/i.test(ua) || (/\bwebOS\b/i.test(ua) && /\bTV\b/i.test(ua))) {
+                    return true;
+                }
+                if (/SamsungBrowser/i.test(ua)) {
+                    return /\b(TV|Tizen|SMART[\s_-]?TV|SmartTV)\b/i.test(ua);
+                }
+                return false;
+            },
+
+            log(message, detail) {
+                if (!this.debug) {
+                    return;
+                }
+                try {
+                    if (detail !== undefined) {
+                        console.info('[TV Audio]', message, detail);
+                    } else {
+                        console.info('[TV Audio]', message);
+                    }
+                } catch (e) {}
+            },
 
             ensure(token, options = {}) {
                 if (!token) {
                     return this.panels[token];
+                }
+
+                const hintSmartTv = options.isSmartTv === true
+                    || this.isSmartTvBrowser(options.userAgent);
+                const effectUrl = typeof options.effectUrl === 'string' && options.effectUrl !== ''
+                    ? options.effectUrl
+                    : DEFAULT_EFFECT_URL;
+
+                if (options.audioDebug === true) {
+                    this.debug = true;
                 }
 
                 if (!this.panels[token]) {
@@ -327,6 +399,9 @@
                         clinicChimeEnabled: options.chimeEnabled !== false,
                         clinicSpeechEnabled: options.speechEnabled !== false,
                         chimeVolume: Math.max(0, Math.min(100, Number(options.chimeVolume ?? 70))),
+                        isSmartTv: hintSmartTv || this.isSmartTvBrowser(),
+                        effectUrl: effectUrl,
+                        effectAudio: null,
                     };
 
                     try {
@@ -334,10 +409,20 @@
                     } catch (e) {
                         this.panels[token].soundEnabled = false;
                     }
+
+                    this.log('smartTv=' + String(this.panels[token].isSmartTv));
+                    if (this.panels[token].isSmartTv) {
+                        this.ensureSmartTvEffect(this.panels[token]);
+                    }
                 } else {
                     this.panels[token].clinicChimeEnabled = options.chimeEnabled !== false;
                     this.panels[token].clinicSpeechEnabled = options.speechEnabled !== false;
                     this.panels[token].chimeVolume = Math.max(0, Math.min(100, Number(options.chimeVolume ?? 70)));
+                    this.panels[token].isSmartTv = hintSmartTv || this.panels[token].isSmartTv || this.isSmartTvBrowser();
+                    this.panels[token].effectUrl = effectUrl;
+                    if (this.panels[token].isSmartTv) {
+                        this.ensureSmartTvEffect(this.panels[token]);
+                    }
                 }
 
                 return this.panels[token];
@@ -347,6 +432,50 @@
                 return Boolean(this.panels[token]?.soundEnabled);
             },
 
+            ensureSmartTvEffect(panel) {
+                if (panel.effectAudio) {
+                    return panel.effectAudio;
+                }
+
+                let audio = null;
+                try {
+                    audio = document.querySelector('audio[data-tv-call-effect]');
+                } catch (e) {
+                    audio = null;
+                }
+
+                if (!audio) {
+                    audio = new Audio();
+                    audio.preload = 'auto';
+                    audio.src = panel.effectUrl || DEFAULT_EFFECT_URL;
+                    try {
+                        audio.load();
+                    } catch (e) {}
+                }
+
+                panel.effectAudio = audio;
+                return audio;
+            },
+
+            async unlockSmartTvEffect(panel) {
+                const audio = this.ensureSmartTvEffect(panel);
+                try {
+                    audio.muted = true;
+                    const playPromise = audio.play();
+                    if (playPromise && typeof playPromise.then === 'function') {
+                        await playPromise.catch(() => {});
+                    }
+                    audio.pause();
+                    audio.currentTime = 0;
+                    audio.muted = false;
+                } catch (e) {
+                    try {
+                        audio.muted = false;
+                        audio.currentTime = 0;
+                    } catch (err) {}
+                }
+            },
+
             async enable(token, options = {}) {
                 const panel = this.ensure(token, options);
                 panel.soundEnabled = true;
@@ -354,6 +483,11 @@
                 try {
                     sessionStorage.setItem(storageKey(token), '1');
                 } catch (e) {}
+
+                if (panel.isSmartTv) {
+                    await this.unlockSmartTvEffect(panel);
+                    return true;
+                }
 
                 // Unlock AudioContext inside the user gesture for this tab/panel instance.
                 await this.ensureAudioContext(panel);
@@ -404,7 +538,7 @@
                     panel.lastPlayedCallId = callId;
                 }
 
-                // One utterance at a time for this panel tab.
+                // One utterance / effect at a time for this panel tab.
                 this.stopSpeech(panel);
 
                 window.dispatchEvent(new CustomEvent('tv-call-audio-begin', { detail: { panelToken: token, callId } }));
@@ -413,6 +547,14 @@
                     panel.speaking = false;
                     window.dispatchEvent(new CustomEvent('tv-call-audio-end', { detail: { panelToken: token, callId } }));
                 };
+
+                // Smart TV: MP3 effect only — no oscillator chime, no speechSynthesis, no robotic TTS.
+                if (panel.isSmartTv || this.isSmartTvBrowser()) {
+                    panel.isSmartTv = true;
+                    this.log('smart-tv effect selected');
+                    this.playSmartTvEffect(panel, finish);
+                    return;
+                }
 
                 const runSpeech = () => {
                     if (panel.clinicSpeechEnabled) {
@@ -431,6 +573,54 @@
                     this.playChime(panel).then(runSpeech).catch(runSpeech);
                 } else {
                     runSpeech();
+                }
+            },
+
+            playSmartTvEffect(panel, onEnd) {
+                const safeEnd = () => {
+                    panel.speaking = false;
+                    if (typeof onEnd === 'function') {
+                        onEnd();
+                    }
+                };
+
+                let audio;
+                try {
+                    audio = this.ensureSmartTvEffect(panel);
+                } catch (e) {
+                    this.log('effect error', 'ensure');
+                    safeEnd();
+                    return;
+                }
+
+                panel.speaking = true;
+
+                const done = (reason) => {
+                    try {
+                        audio.onended = null;
+                        audio.onerror = null;
+                    } catch (e) {}
+                    if (reason === 'error') {
+                        this.log('effect error');
+                    } else {
+                        this.log('effect ended');
+                    }
+                    safeEnd();
+                };
+
+                try {
+                    audio.onended = () => done('ended');
+                    audio.onerror = () => done('error');
+                    audio.pause();
+                    audio.currentTime = 0;
+                    this.log('effect playing');
+                    const playPromise = audio.play();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                        playPromise.catch(() => done('error'));
+                    }
+                } catch (e) {
+                    this.log('effect error', 'play');
+                    done('error');
                 }
             },
 
@@ -467,12 +657,25 @@
                     }
                 } catch (e) {}
                 this.stopFallbackAudio(panel);
+                this.stopSmartTvEffect(panel);
                 panel.speaking = false;
                 panel._speechStarted = false;
                 if (panel._speechProbeTimer) {
                     clearTimeout(panel._speechProbeTimer);
                     panel._speechProbeTimer = null;
                 }
+            },
+
+            stopSmartTvEffect(panel) {
+                if (!panel.effectAudio) {
+                    return;
+                }
+                try {
+                    panel.effectAudio.onended = null;
+                    panel.effectAudio.onerror = null;
+                    panel.effectAudio.pause();
+                    panel.effectAudio.currentTime = 0;
+                } catch (e) {}
             },
 
             stopFallbackAudio(panel) {
@@ -489,8 +692,9 @@
             },
 
             /**
-             * Prefer speechSynthesis when it actually starts speaking.
-             * Samsung Tizen often exposes the API but does not start — fall back to <audio> WAV.
+             * Desktop only: prefer speechSynthesis when it actually starts speaking.
+             * Smart TV must not reach this path (announce routes to MP3 effect).
+             * Desktop fallback WAV is kept for browsers where speechSynthesis is a stub.
              */
             speak(panel, text, onEnd, audioUrl) {
                 const safeEnd = () => {
@@ -499,6 +703,12 @@
                         onEnd();
                     }
                 };
+
+                if (panel.isSmartTv || this.isSmartTvBrowser()) {
+                    // Hard guard: Smart TV must not use speech or robotic TTS.
+                    safeEnd();
+                    return;
+                }
 
                 if (!text) {
                     safeEnd();
@@ -569,7 +779,7 @@
 
                 utterance.onend = () => {
                     if (!panel._speechStarted) {
-                        // Instant end without start → API is a stub (common on Samsung).
+                        // Instant end without start → API is a stub.
                         settleFallback();
                         return;
                     }
@@ -595,6 +805,13 @@
             },
 
             playAudioUrl(panel, url, onEnd) {
+                if (panel.isSmartTv || this.isSmartTvBrowser()) {
+                    if (typeof onEnd === 'function') {
+                        onEnd();
+                    }
+                    return;
+                }
+
                 this.stopFallbackAudio(panel);
                 panel.speaking = true;
 
