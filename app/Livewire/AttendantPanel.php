@@ -20,6 +20,7 @@ use App\Models\TicketType;
 use App\Models\Unit;
 use App\Services\NextTicketSelector;
 use App\Services\OperationalContext;
+use App\Support\DeskLease;
 use App\TicketStatus;
 use App\TicketTransferType;
 use Carbon\CarbonImmutable;
@@ -410,9 +411,13 @@ class AttendantPanel extends Component
             return collect();
         }
 
+        // Opportunistic cleanup of abandoned claims (does not touch tickets).
+        DeskLease::purgeExpired();
+
         $occupiedDeskIds = DeskAssignment::query()
             ->whereIn('desk_id', $desks->modelKeys())
             ->where('user_id', '!=', auth()->id())
+            ->where('last_seen_at', '>', DeskLease::expiresBefore())
             ->pluck('desk_id')
             ->map(fn ($id): int => (int) $id)
             ->all();

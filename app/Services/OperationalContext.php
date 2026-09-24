@@ -8,6 +8,7 @@ use App\Models\DeskAssignment;
 use App\Models\Sector;
 use App\Models\Unit;
 use App\Models\User;
+use App\Support\DeskLease;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Session\SessionManager;
 use Illuminate\Session\Store;
@@ -101,7 +102,10 @@ class OperationalContext
             ->where('user_id', $user->id)
             ->first();
 
-        if ($assignment === null) {
+        if ($assignment === null || ! DeskLease::isActive($assignment)) {
+            if ($assignment !== null) {
+                $assignment->delete();
+            }
             $session->forget(self::DESK_SESSION_KEY);
 
             return null;

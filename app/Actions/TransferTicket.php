@@ -8,6 +8,7 @@ use App\Models\Ticket;
 use App\Models\TicketTransfer;
 use App\Models\User;
 use App\Services\OperationalContext;
+use App\Support\DeskLease;
 use App\TicketStatus;
 use App\TicketTransferType;
 use Carbon\CarbonImmutable;
@@ -161,7 +162,7 @@ class TransferTicket
             ->where('user_id', $actor->id)
             ->first();
 
-        if ($assignment === null) {
+        if ($assignment === null || ! DeskLease::isActive($assignment)) {
             throw ValidationException::withMessages([
                 'desk' => 'A mesa não está atribuída a você.',
             ]);

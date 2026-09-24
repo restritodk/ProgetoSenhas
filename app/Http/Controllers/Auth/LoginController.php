@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Actions\ReleaseDesk;
 use App\Http\Controllers\Controller;
 use App\Services\UserPresence;
 use Illuminate\Http\RedirectResponse;
@@ -47,11 +48,12 @@ class LoginController extends Controller
         return redirect()->intended($destination);
     }
 
-    public function destroy(Request $request, UserPresence $presence): RedirectResponse
+    public function destroy(Request $request, UserPresence $presence, ReleaseDesk $releaseDesk): RedirectResponse
     {
         $user = Auth::user();
 
         if ($user !== null) {
+            $releaseDesk->handle($user);
             $presence->markOffline($user);
         }
 

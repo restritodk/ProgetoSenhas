@@ -6,6 +6,7 @@ use App\Models\Desk;
 use App\Models\DeskAssignment;
 use App\Models\User;
 use App\Services\OperationalContext;
+use App\Support\DeskLease;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -32,6 +33,7 @@ class ClaimDesk
         }
 
         return DB::transaction(function () use ($actor, $desk, $unit): DeskAssignment {
+            // Release any other desk this user still holds (switch desk).
             DeskAssignment::query()
                 ->where('user_id', $actor->id)
                 ->where('desk_id', '!=', $desk->id)
@@ -41,6 +43,13 @@ class ClaimDesk
                 ->where('desk_id', $desk->id)
                 ->lockForUpdate()
                 ->first();
+
+            // Abandoned lease: purge atomically under the same lock, then reclaim.
+            // Tickets (CALLED / IN_SERVICE) are never mutated here.
+            if ($existing !== null && ! DeskLease::isActive($existing)) {
+                $existing->delete();
+                $existing = null;
+            }
 
             if ($existing !== null && (int) $existing->user_id !== (int) $actor->id) {
                 throw ValidationException::withMessages([

@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\NextTicketSelector;
 use App\Services\OperationalContext;
 use App\Services\UnitQueuePolicyResolver;
+use App\Support\DeskLease;
 use App\TicketCallType;
 use App\TicketStatus;
 use Carbon\CarbonImmutable;
@@ -128,7 +129,7 @@ class CallNextTicket
             ->where('user_id', $actor->id)
             ->first();
 
-        if ($assignment === null) {
+        if ($assignment === null || ! DeskLease::isActive($assignment)) {
             throw ValidationException::withMessages([
                 'desk' => 'A mesa não está atribuída a você.',
             ]);
