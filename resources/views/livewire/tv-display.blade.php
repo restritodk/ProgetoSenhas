@@ -20,7 +20,8 @@
     $logoBackgroundColor = \App\Support\LogoSurface::normalizeColor($p['logo_background_color'] ?? '#FFFFFF');
     $logoSurfaceCss = \App\Support\LogoSurface::cssBackground($logoBackground, $logoBackgroundColor);
     $isSmartTv = \App\Support\SmartTvBrowser::matches(request()->userAgent());
-    $smartTvEffectUrl = asset('sond/EfeitoSonoroTV.mp3');
+    // Relative URL — absolute asset(APP_URL) breaks when the TV opens the panel by IP/host mismatch.
+    $smartTvEffectUrl = '/sond/EfeitoSonoroTV.mp3';
     $tvAudioDebug = (bool) config('app.debug');
 @endphp
 <div
@@ -38,11 +39,12 @@
     ]))"
     x-init="init()"
 >
-    {{-- Stable audio host: remount avoided so Livewire morphs that update calls / highlight keep audio state. --}}
+    {{-- Stable audio host (wire:ignore). Audio is visually hidden but NOT display:none —
+        some Smart TV browsers refuse to play media inside display:none. --}}
     <div
         wire:ignore
-        class="hidden"
         aria-hidden="true"
+        style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);opacity:0;pointer-events:none;"
         x-data
         x-init="$nextTick(() => window.__humanaTvCallAudio && window.__humanaTvCallAudio.ensure(@js($publicToken), @js([
             'chimeEnabled' => $chimeEnabled,
@@ -53,13 +55,12 @@
             'audioDebug' => $tvAudioDebug,
         ])))"
     >
-        @if ($isSmartTv)
-            <audio
-                data-tv-call-effect
-                preload="auto"
-                src="{{ $smartTvEffectUrl }}"
-            ></audio>
-        @endif
+        <audio
+            data-tv-call-effect
+            preload="auto"
+            playsinline
+            src="{{ $smartTvEffectUrl }}"
+        ></audio>
     </div>
     {{-- HEADER --}}
     <header class="tv-header flex shrink-0 items-center justify-between gap-2 border-b-4 border-primary bg-primary px-[max(0.75rem,var(--tv-pad))] sm:gap-4 sm:px-5 lg:px-8" style="color: {{ $onPrimary }};">
@@ -363,14 +364,23 @@
             },
 
             log(message, detail) {
-                if (!this.debug) {
-                    return;
-                }
+                try {
+                    if (this.debug) {
+                        if (detail !== undefined) {
+                            console.info('[TV Audio]', message, detail);
+                        } else {
+                            console.info('[TV Audio]', message);
+                        }
+                    }
+                } catch (e) {}
+            },
+
+            warn(message, detail) {
                 try {
                     if (detail !== undefined) {
-                        console.info('[TV Audio]', message, detail);
+                        console.warn('[TV Audio]', message, detail);
                     } else {
-                        console.info('[TV Audio]', message);
+                        console.warn('[TV Audio]', message);
                     }
                 } catch (e) {}
             },
@@ -402,6 +412,7 @@
                         isSmartTv: hintSmartTv || this.isSmartTvBrowser(),
                         effectUrl: effectUrl,
                         effectAudio: null,
+                        effectUnlocked: false,
                     };
 
                     try {
@@ -437,6 +448,7 @@
                     return panel.effectAudio;
                 }
 
+                const url = panel.effectUrl || DEFAULT_EFFECT_URL;
                 let audio = null;
                 try {
                     audio = document.querySelector('audio[data-tv-call-effect]');
@@ -445,33 +457,89 @@
                 }
 
                 if (!audio) {
-                    audio = new Audio();
+                    audio = document.createElement('audio');
+                    audio.setAttribute('data-tv-call-effect', '1');
                     audio.preload = 'auto';
-                    audio.src = panel.effectUrl || DEFAULT_EFFECT_URL;
+                    audio.playsInline = true;
+                    audio.setAttribute('playsinline', '');
                     try {
-                        audio.load();
+                        document.body.appendChild(audio);
                     } catch (e) {}
+                }
+
+                try {
+                    // Prefer relative path so host/IP mismatches do not break the TV.
+                    if (!audio.getAttribute('src') || audio.getAttribute('src') !== url) {
+                        audio.setAttribute('src', url);
+                        audio.src = url;
+                    }
+                    audio.preload = 'auto';
+                    audio.playsInline = true;
+                    audio.load();
+                } catch (e) {
+                    this.warn('effect load failed', e && e.message ? e.message : e);
                 }
 
                 panel.effectAudio = audio;
                 return audio;
             },
 
+            /**
+             * Must play UNMUTED inside the user gesture. Muted unlock does not authorize
+             * later unmuted play() on many Samsung/Tizen browsers.
+             */
             async unlockSmartTvEffect(panel) {
                 const audio = this.ensureSmartTvEffect(panel);
+                audio.muted = false;
+                audio.volume = 1;
+
                 try {
-                    audio.muted = true;
+                    if (audio.readyState < 2) {
+                        await new Promise((resolve) => {
+                            let settled = false;
+                            const finish = () => {
+                                if (settled) {
+                                    return;
+                                }
+                                settled = true;
+                                audio.removeEventListener('canplay', finish);
+                                audio.removeEventListener('loadeddata', finish);
+                                resolve();
+                            };
+                            audio.addEventListener('canplay', finish);
+                            audio.addEventListener('loadeddata', finish);
+                            setTimeout(finish, 2500);
+                            try {
+                                audio.load();
+                            } catch (e) {}
+                        });
+                    }
+                } catch (e) {}
+
+                try {
+                    audio.pause();
+                    try {
+                        audio.currentTime = 0;
+                    } catch (e) {}
                     const playPromise = audio.play();
                     if (playPromise && typeof playPromise.then === 'function') {
-                        await playPromise.catch(() => {});
+                        await playPromise;
                     }
-                    audio.pause();
-                    audio.currentTime = 0;
-                    audio.muted = false;
-                } catch (e) {
+                    panel.effectUnlocked = true;
+                    this.log('effect unlocked (unmuted play on gesture)');
+                    // Let a short burst confirm sound, then stop — full play happens on TicketCall.
+                    await new Promise((resolve) => setTimeout(resolve, 450));
                     try {
-                        audio.muted = false;
+                        audio.pause();
                         audio.currentTime = 0;
+                    } catch (e) {}
+                } catch (e) {
+                    panel.effectUnlocked = false;
+                    this.warn('effect unlock failed', e && e.message ? e.message : e);
+                    // Last resort: Web Audio chime inside the same gesture.
+                    try {
+                        await this.ensureAudioContext(panel);
+                        await this.playChime(panel);
                     } catch (err) {}
                 }
             },
@@ -484,7 +552,8 @@
                     sessionStorage.setItem(storageKey(token), '1');
                 } catch (e) {}
 
-                if (panel.isSmartTv) {
+                if (panel.isSmartTv || this.isSmartTvBrowser()) {
+                    panel.isSmartTv = true;
                     await this.unlockSmartTvEffect(panel);
                     return true;
                 }
@@ -527,6 +596,7 @@
                 const panel = this.panels[token] || this.ensure(token);
 
                 if (!panel.soundEnabled) {
+                    this.warn('announce skipped — sound not enabled');
                     return;
                 }
 
@@ -548,7 +618,7 @@
                     window.dispatchEvent(new CustomEvent('tv-call-audio-end', { detail: { panelToken: token, callId } }));
                 };
 
-                // Smart TV: MP3 effect only — no oscillator chime, no speechSynthesis, no robotic TTS.
+                // Smart TV: MP3 effect only — no speechSynthesis / robotic TTS.
                 if (panel.isSmartTv || this.isSmartTvBrowser()) {
                     panel.isSmartTv = true;
                     this.log('smart-tv effect selected');
@@ -588,40 +658,82 @@
                 try {
                     audio = this.ensureSmartTvEffect(panel);
                 } catch (e) {
-                    this.log('effect error', 'ensure');
-                    safeEnd();
+                    this.warn('effect error', 'ensure');
+                    this.playChime(panel).finally(safeEnd);
                     return;
                 }
 
                 panel.speaking = true;
+                audio.muted = false;
+                audio.volume = 1;
 
+                let settled = false;
                 const done = (reason) => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
                     try {
                         audio.onended = null;
                         audio.onerror = null;
                     } catch (e) {}
                     if (reason === 'error') {
-                        this.log('effect error');
-                    } else {
-                        this.log('effect ended');
+                        this.warn('effect error — falling back to chime');
+                        this.playChime(panel).finally(safeEnd);
+                        return;
                     }
+                    this.log('effect ended');
                     safeEnd();
                 };
 
-                try {
-                    audio.onended = () => done('ended');
-                    audio.onerror = () => done('error');
-                    audio.pause();
-                    audio.currentTime = 0;
-                    this.log('effect playing');
-                    const playPromise = audio.play();
-                    if (playPromise && typeof playPromise.catch === 'function') {
-                        playPromise.catch(() => done('error'));
+                const startPlay = () => {
+                    try {
+                        audio.onended = () => done('ended');
+                        audio.onerror = () => done('error');
+                        try {
+                            audio.pause();
+                        } catch (e) {}
+                        try {
+                            if (audio.readyState >= 1) {
+                                audio.currentTime = 0;
+                            }
+                        } catch (e) {}
+                        this.log('effect playing');
+                        const playPromise = audio.play();
+                        if (playPromise && typeof playPromise.then === 'function') {
+                            playPromise.then(() => {
+                                panel.effectUnlocked = true;
+                            }).catch((err) => {
+                                this.warn('effect play rejected', err && err.message ? err.message : err);
+                                done('error');
+                            });
+                        }
+                    } catch (e) {
+                        this.warn('effect error', 'play');
+                        done('error');
                     }
-                } catch (e) {
-                    this.log('effect error', 'play');
-                    done('error');
+                };
+
+                if (audio.readyState >= 2) {
+                    startPlay();
+                    return;
                 }
+
+                const onReady = () => {
+                    audio.removeEventListener('canplay', onReady);
+                    audio.removeEventListener('loadeddata', onReady);
+                    startPlay();
+                };
+                audio.addEventListener('canplay', onReady);
+                audio.addEventListener('loadeddata', onReady);
+                try {
+                    audio.load();
+                } catch (e) {}
+                setTimeout(() => {
+                    if (!settled) {
+                        startPlay();
+                    }
+                }, 2000);
             },
 
             async playChime(panel) {

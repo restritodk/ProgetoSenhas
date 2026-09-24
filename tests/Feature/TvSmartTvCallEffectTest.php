@@ -68,7 +68,6 @@ class TvSmartTvCallEffectTest extends TestCase
             ->getContent();
 
         $this->assertStringContainsString('isSmartTvBrowser', $html);
-        $this->assertStringNotContainsString('<audio', $html);
         $this->assertTrue(
             str_contains($html, '"isSmartTv":false')
             || str_contains($html, '\u0022isSmartTv\u0022:false')
@@ -78,6 +77,9 @@ class TvSmartTvCallEffectTest extends TestCase
         $this->assertStringContainsString('speechSynthesis', $html);
         $this->assertStringContainsString('playChime', $html);
         $this->assertStringContainsString('SpeechSynthesisUtterance', $html);
+        // Desktop keeps the preload element but announce must not select the Smart TV branch.
+        $this->assertStringContainsString('smart-tv effect selected', $html);
+        $this->assertStringContainsString('/sond/EfeitoSonoroTV.mp3', $html);
     }
 
     public function test_initial_and_recall_dispatch_for_smart_tv_without_role_filter(): void
