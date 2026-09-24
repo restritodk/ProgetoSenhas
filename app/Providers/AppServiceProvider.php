@@ -19,9 +19,13 @@ use App\Support\AdminNavigation;
 use App\Support\AdminPresentation;
 use App\Support\AttendantNavigation;
 use App\Support\PermissionCatalog;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -32,6 +36,21 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        RateLimiter::for('login', function (Request $request): Limit {
+            $email = Str::lower((string) $request->input('email'));
+
+            return Limit::perMinute(5)->by($email.'|'.$request->ip());
+        });
+
+        RateLimiter::for('kiosk-page', function (Request $request): Limit {
+            return Limit::perMinute(120)->by($request->ip());
+        });
+
+        // TV polling (~3s) + media (~45s); allow headroom without aiding brute-force of short codes.
+        RateLimiter::for('tv-page', function (Request $request): Limit {
+            return Limit::perMinute(120)->by($request->ip());
+        });
+
         foreach (PermissionCatalog::keys() as $permissionKey) {
             Gate::define($permissionKey, function (User $user) use ($permissionKey): bool {
                 return $user->hasPermission($permissionKey);
