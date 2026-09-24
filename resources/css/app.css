@@ -738,6 +738,36 @@
         font-size: 13px;
     }
 
+    .kiosk-print-receipt__logo {
+        display: block;
+        margin: 0 auto 3mm;
+        object-fit: contain;
+        object-position: center;
+        background: transparent;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .kiosk-print-receipt__logo.is-hidden,
+    .kiosk-print-receipt__logo[hidden] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    .kiosk-print-receipt[data-width='58'] .kiosk-print-receipt__logo {
+        max-width: 28mm;
+        max-height: 14mm;
+        width: auto;
+        height: auto;
+    }
+
+    .kiosk-print-receipt[data-width='80'] .kiosk-print-receipt__logo {
+        max-width: 40mm;
+        max-height: 18mm;
+        width: auto;
+        height: auto;
+    }
+
     .kiosk-print-receipt__clinic {
         font-weight: 700;
         text-transform: uppercase;

@@ -5,17 +5,21 @@ namespace Tests\Feature;
 use App\Livewire\KiosksManager;
 use App\Livewire\PublicKiosk;
 use App\Models\Clinic;
+use App\Models\ClinicSetting;
 use App\Models\Kiosk;
 use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\Unit;
 use App\Models\UnitTicketType;
 use App\Models\User;
+use App\Services\ClinicBranding;
 use App\Services\ClinicSettings;
 use App\Services\KioskPrintGrantService;
 use App\Support\KioskPrintPayload;
 use App\UserRole;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -142,8 +146,112 @@ class KioskPrintIntegrationTest extends TestCase
         $this->assertIsArray($payload);
         $this->assertSame($component->get('issuedDisplayCode'), $payload['displayCode']);
         $this->assertSame('58', $payload['paperWidth']);
+        $this->assertArrayHasKey('logoUrl', $payload);
+        $this->assertNull($payload['logoUrl']);
         $this->assertArrayNotHasKey('signature', $payload);
         $this->assertArrayNotHasKey('agentUrl', $payload);
+        $this->assertSame(1, Ticket::query()->count());
+    }
+
+    public function test_browser_receipt_includes_main_logo_url_from_clinic_identity(): void
+    {
+        [$admin, $kiosk, $type] = $this->ready();
+        Storage::fake(ClinicSetting::DISK);
+
+        $path = app(ClinicBranding::class)->storeLogo(
+            $kiosk->clinic,
+            'main_logo_path',
+            UploadedFile::fake()->image('main-logo.png', 200, 80),
+        );
+        $expectedUrl = app(ClinicBranding::class)->urlForPath($path);
+
+        $kiosk->forceFill([
+            'print_enabled' => true,
+            'print_method' => 'browser',
+            'print_paper_width' => '80',
+        ])->save();
+
+        $component = Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $type->id)
+            ->assertSet('screen', 'result')
+            ->assertDispatched('kiosk-browser-print')
+            ->assertNotDispatched('kiosk-print-ticket');
+
+        $payload = $component->get('browserPrintPayload');
+        $this->assertIsArray($payload);
+        $this->assertSame($expectedUrl, $payload['logoUrl']);
+        $this->assertSame(1, Ticket::query()->count());
+        $this->assertStringContainsString((string) $kiosk->clinic_id, $path);
+    }
+
+    public function test_browser_receipt_logo_is_isolated_between_clinics(): void
+    {
+        [$adminA, $kioskA, $typeA] = $this->ready();
+        Storage::fake(ClinicSetting::DISK);
+
+        app(ClinicBranding::class)->storeLogo(
+            $kioskA->clinic,
+            'main_logo_path',
+            UploadedFile::fake()->image('clinic-a.png', 120, 60),
+        );
+
+        $kioskA->forceFill([
+            'print_enabled' => true,
+            'print_method' => 'browser',
+        ])->save();
+
+        $clinicB = Clinic::factory()->create(['name' => 'Outra Clinica']);
+        $unitB = Unit::factory()->for($clinicB)->create();
+        $typeB = new TicketType;
+        $typeB->forceFill([
+            'clinic_id' => $clinicB->id,
+            'name' => 'Normal',
+            'prefix' => 'N',
+            'priority' => 10,
+            'active' => true,
+        ])->save();
+        $offerB = new UnitTicketType;
+        $offerB->forceFill([
+            'clinic_id' => $clinicB->id,
+            'unit_id' => $unitB->id,
+            'ticket_type_id' => $typeB->id,
+            'position' => 1,
+            'display_name' => 'Normal',
+            'active' => true,
+        ])->save();
+        $kioskB = Kiosk::factory()->create([
+            'clinic_id' => $clinicB->id,
+            'unit_id' => $unitB->id,
+            'print_enabled' => true,
+            'print_method' => 'browser',
+        ]);
+
+        $payloadA = Livewire::test(PublicKiosk::class, ['publicToken' => $kioskA->public_token])
+            ->call('issue', $typeA->id)
+            ->get('browserPrintPayload');
+        $payloadB = Livewire::test(PublicKiosk::class, ['publicToken' => $kioskB->public_token])
+            ->call('issue', $typeB->id)
+            ->get('browserPrintPayload');
+
+        $this->assertIsArray($payloadA);
+        $this->assertIsArray($payloadB);
+        $this->assertNotNull($payloadA['logoUrl']);
+        $this->assertNull($payloadB['logoUrl']);
+    }
+
+    public function test_browser_print_without_logo_still_emits_ticket(): void
+    {
+        [$admin, $kiosk, $type] = $this->ready();
+        $kiosk->forceFill([
+            'print_enabled' => true,
+            'print_method' => 'browser',
+        ])->save();
+
+        Livewire::test(PublicKiosk::class, ['publicToken' => $kiosk->public_token])
+            ->call('issue', $type->id)
+            ->assertSet('screen', 'result')
+            ->assertSet('browserPrintPayload.logoUrl', null);
+
         $this->assertSame(1, Ticket::query()->count());
     }
 
@@ -218,6 +326,36 @@ class KioskPrintIntegrationTest extends TestCase
             ->assertDispatched('kiosk-browser-test-print')
             ->assertNotDispatched('kiosk-agent-test-print');
 
+        $this->assertSame(0, Ticket::query()->count());
+    }
+
+    public function test_browser_test_print_includes_main_logo_when_configured(): void
+    {
+        [$admin, $kiosk] = $this->ready();
+        Storage::fake(ClinicSetting::DISK);
+
+        $path = app(ClinicBranding::class)->storeLogo(
+            $kiosk->clinic,
+            'main_logo_path',
+            UploadedFile::fake()->image('test-logo.png', 160, 60),
+        );
+        $expectedUrl = app(ClinicBranding::class)->urlForPath($path);
+
+        $kiosk->forceFill([
+            'print_method' => 'browser',
+            'print_paper_width' => '80',
+        ])->save();
+
+        $component = Livewire::actingAs($admin)
+            ->test(KiosksManager::class)
+            ->call('edit', $kiosk->id)
+            ->set('printMethod', 'browser')
+            ->call('prepareTestPrint')
+            ->assertDispatched('kiosk-browser-test-print');
+
+        $payload = $component->get('browserTestPrintPayload');
+        $this->assertIsArray($payload);
+        $this->assertSame($expectedUrl, $payload['logoUrl']);
         $this->assertSame(0, Ticket::query()->count());
     }
 

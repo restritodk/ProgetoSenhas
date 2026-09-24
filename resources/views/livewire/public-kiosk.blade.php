@@ -68,6 +68,7 @@
                 issuedAtLabel: payload.issuedAtLabel || first.issuedAtLabel || '',
                 message: payload.message || first.message || '',
                 paperWidth: payload.paperWidth || first.paperWidth || '80',
+                logoUrl: payload.logoUrl || first.logoUrl || null,
             }
         },
         fillBrowserReceipt(payload) {
@@ -83,8 +84,57 @@
             set('receiptType', payload.typeLabel)
             set('receiptAt', payload.issuedAtLabel)
             set('receiptMessage', payload.message)
+
+            const logo = this.$refs.receiptLogo
+            if (logo) {
+                const url = typeof payload.logoUrl === 'string' ? payload.logoUrl.trim() : ''
+                if (url !== '') {
+                    logo.classList.remove('is-hidden')
+                    logo.removeAttribute('hidden')
+                    if (logo.getAttribute('src') !== url) {
+                        logo.setAttribute('src', url)
+                    }
+                } else {
+                    logo.removeAttribute('src')
+                    logo.setAttribute('hidden', 'hidden')
+                    logo.classList.add('is-hidden')
+                }
+            }
         },
-        runBrowserPrint(payload) {
+        waitForReceiptLogo(img) {
+            return new Promise((resolve) => {
+                if (!img || img.hasAttribute('hidden') || img.classList.contains('is-hidden')) {
+                    resolve()
+                    return
+                }
+                const src = img.getAttribute('src') || ''
+                if (src === '') {
+                    resolve()
+                    return
+                }
+                if (img.complete && img.naturalWidth > 0) {
+                    resolve()
+                    return
+                }
+
+                let settled = false
+                const finish = () => {
+                    if (settled) return
+                    settled = true
+                    resolve()
+                }
+
+                img.addEventListener('load', finish, { once: true })
+                img.addEventListener('error', () => {
+                    img.removeAttribute('src')
+                    img.setAttribute('hidden', 'hidden')
+                    img.classList.add('is-hidden')
+                    finish()
+                }, { once: true })
+                window.setTimeout(finish, 2500)
+            })
+        },
+        async runBrowserPrint(payload) {
             if (!payload || !payload.displayCode) return false
 
             window.__humanaBrowserPrintKeys = window.__humanaBrowserPrintKeys || {}
@@ -95,6 +145,7 @@
             window.__humanaBrowserPrintKeys[key] = true
 
             this.fillBrowserReceipt(payload)
+            await this.waitForReceiptLogo(this.$refs.receiptLogo)
             window.print()
 
             return true
@@ -151,6 +202,16 @@
         data-width="{{ $browserPrintPayload['paperWidth'] ?? '80' }}"
         aria-hidden="true"
     >
+        <img
+            class="kiosk-print-receipt__logo @if (empty($browserPrintPayload['logoUrl'])) is-hidden @endif"
+            x-ref="receiptLogo"
+            alt=""
+            @if (! empty($browserPrintPayload['logoUrl']))
+                src="{{ $browserPrintPayload['logoUrl'] }}"
+            @else
+                hidden
+            @endif
+        >
         <p class="kiosk-print-receipt__clinic" x-ref="receiptClinic">{{ $browserPrintPayload['clinicName'] ?? $clinicName }}</p>
         <p class="kiosk-print-receipt__unit" x-ref="receiptUnit">{{ $browserPrintPayload['unitName'] ?? $resultUnitLabel }}</p>
         <p class="kiosk-print-receipt__label">SENHA</p>

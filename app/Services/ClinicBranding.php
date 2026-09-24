@@ -74,6 +74,14 @@ class ClinicBranding
         return $this->resolve($clinic)['kiosk_logo_url'];
     }
 
+    /**
+     * Main clinic logo URL for browser thermal receipts (Identidade visual → Logo principal).
+     */
+    public function logoForPrintReceipt(Clinic $clinic): ?string
+    {
+        return $this->resolve($clinic)['main_logo_url'];
+    }
+
     public function displayName(Clinic $clinic): string
     {
         return $this->resolve($clinic)['display_name'];

@@ -74,9 +74,41 @@
                                     issuedAtLabel: payload.issuedAtLabel || first.issuedAtLabel || '',
                                     message: payload.message || first.message || '',
                                     paperWidth: payload.paperWidth || first.paperWidth || '80',
+                                    logoUrl: payload.logoUrl || first.logoUrl || null,
                                 }
                             },
-                            runBrowserTestPrint(payload) {
+                            waitForLogo(img) {
+                                return new Promise((resolve) => {
+                                    if (!img || img.hasAttribute('hidden') || img.classList.contains('is-hidden')) {
+                                        resolve()
+                                        return
+                                    }
+                                    const src = img.getAttribute('src') || ''
+                                    if (src === '') {
+                                        resolve()
+                                        return
+                                    }
+                                    if (img.complete && img.naturalWidth > 0) {
+                                        resolve()
+                                        return
+                                    }
+                                    let settled = false
+                                    const finish = () => {
+                                        if (settled) return
+                                        settled = true
+                                        resolve()
+                                    }
+                                    img.addEventListener('load', finish, { once: true })
+                                    img.addEventListener('error', () => {
+                                        img.removeAttribute('src')
+                                        img.setAttribute('hidden', 'hidden')
+                                        img.classList.add('is-hidden')
+                                        finish()
+                                    }, { once: true })
+                                    window.setTimeout(finish, 2500)
+                                })
+                            },
+                            async runBrowserTestPrint(payload) {
                                 const root = this.$refs.adminBrowserReceipt
                                 if (!root || !payload?.displayCode) return
                                 root.dataset.width = payload.paperWidth === '58' ? '58' : '80'
@@ -91,12 +123,24 @@
                                 Object.entries(map).forEach(([ref, value]) => {
                                     if (this.$refs[ref]) this.$refs[ref].textContent = value || ''
                                 })
-                                window.requestAnimationFrame(() => {
-                                    window.requestAnimationFrame(() => {
-                                        window.print()
-                                        $wire.clearBrowserTestPrintPayload()
-                                    })
-                                })
+                                const logo = this.$refs.adminReceiptLogo
+                                if (logo) {
+                                    const url = typeof payload.logoUrl === 'string' ? payload.logoUrl.trim() : ''
+                                    if (url !== '') {
+                                        logo.classList.remove('is-hidden')
+                                        logo.removeAttribute('hidden')
+                                        if (logo.getAttribute('src') !== url) {
+                                            logo.setAttribute('src', url)
+                                        }
+                                    } else {
+                                        logo.removeAttribute('src')
+                                        logo.setAttribute('hidden', 'hidden')
+                                        logo.classList.add('is-hidden')
+                                    }
+                                }
+                                await this.waitForLogo(logo)
+                                window.print()
+                                $wire.clearBrowserTestPrintPayload()
                             }
                         }"
                         @kiosk-agent-list-printers.window="
@@ -154,6 +198,7 @@
                         @kiosk-browser-test-print.window="runBrowserTestPrint(extractBrowserDetail($event.detail))"
                     >
                         <div class="kiosk-print-receipt" x-ref="adminBrowserReceipt" data-width="80" aria-hidden="true">
+                            <img class="kiosk-print-receipt__logo is-hidden" x-ref="adminReceiptLogo" alt="" hidden>
                             <p class="kiosk-print-receipt__clinic" x-ref="adminReceiptClinic"></p>
                             <p class="kiosk-print-receipt__unit" x-ref="adminReceiptUnit"></p>
                             <p class="kiosk-print-receipt__label">SENHA</p>

@@ -92,7 +92,8 @@ class KiosksManager extends Component
      *     typeLabel: string,
      *     issuedAtLabel: string,
      *     message: string,
-     *     paperWidth: string
+     *     paperWidth: string,
+     *     logoUrl: ?string
      * }|null
      */
     public ?array $browserTestPrintPayload = null;
@@ -350,6 +351,9 @@ class KiosksManager extends Component
 
         if ($method === KioskPrintMethod::Browser) {
             $this->testPrintGrant = null;
+            $logoUrl = $kiosk->clinic !== null
+                ? $branding->logoForPrintReceipt($kiosk->clinic)
+                : null;
             $this->browserTestPrintPayload = [
                 ...KioskPrintPayload::forTicket(
                     displayCode: 'TESTE',
@@ -360,6 +364,7 @@ class KiosksManager extends Component
                     message: 'Comprovante de teste do navegador. Nenhuma senha foi emitida.',
                 ),
                 'paperWidth' => $paperWidth,
+                'logoUrl' => $logoUrl,
             ];
 
             $this->dispatch(
@@ -371,6 +376,7 @@ class KiosksManager extends Component
                 issuedAtLabel: $this->browserTestPrintPayload['issuedAtLabel'],
                 message: $this->browserTestPrintPayload['message'],
                 paperWidth: $paperWidth,
+                logoUrl: $logoUrl,
             );
             $this->printStatusMessage = 'Janela de impressão do navegador solicitada (teste).';
 

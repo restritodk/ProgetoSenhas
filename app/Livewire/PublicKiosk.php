@@ -63,7 +63,8 @@ class PublicKiosk extends Component
      *     typeLabel: string,
      *     issuedAtLabel: string,
      *     message: string,
-     *     paperWidth: string
+     *     paperWidth: string,
+     *     logoUrl: ?string
      * }|null
      */
     public ?array $browserPrintPayload = null;
@@ -90,6 +91,7 @@ class PublicKiosk extends Component
         IssueTicket $issueTicket,
         KioskPrintGrantService $printGrants,
         ClinicSettings $settings,
+        ClinicBranding $branding,
     ): void {
         if ($this->issuing || $this->screen === 'result') {
             return;
@@ -184,9 +186,15 @@ class PublicKiosk extends Component
                 ]);
             } elseif ($printMethod === KioskPrintMethod::Browser) {
                 $paperWidth = $printGrants->normalizePaperWidth($kioskForPrint->print_paper_width);
+                $logoUrl = null;
+                if ($kiosk->clinic !== null) {
+                    $logoUrl = $branding->logoForPrintReceipt($kiosk->clinic);
+                }
+
                 $this->browserPrintPayload = [
                     ...$ticketPayload,
                     'paperWidth' => $paperWidth,
+                    'logoUrl' => $logoUrl,
                 ];
 
                 Log::info('kiosk.print.browser_print_requested', [
@@ -194,6 +202,7 @@ class PublicKiosk extends Component
                     'ticket_id' => $ticket->id,
                     'display_code' => $ticket->display_code,
                     'paper_width' => $paperWidth,
+                    'has_logo' => $logoUrl !== null,
                 ]);
 
                 $this->dispatch(
@@ -205,6 +214,7 @@ class PublicKiosk extends Component
                     issuedAtLabel: $ticketPayload['issuedAtLabel'],
                     message: $ticketPayload['message'],
                     paperWidth: $paperWidth,
+                    logoUrl: $logoUrl,
                 );
             } else {
                 $this->printDispatch = $printGrants->grantPrintTicket(
