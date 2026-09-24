@@ -208,37 +208,37 @@
             <aside class="flex min-h-0 flex-col gap-[var(--tv-gap)] max-md:contents md:order-none">
                 {{-- CURRENT CALL --}}
                 <section
-                    class="flex min-h-0 flex-col overflow-hidden rounded-xl border-2 border-primary bg-surface max-md:order-1 sm:rounded-2xl sm:border-[3px] md:flex-[1.15] {{ $highlight ? 'tv-highlight' : '' }}"
+                    class="flex min-h-0 flex-col overflow-hidden rounded-xl border-2 border-primary bg-surface max-md:order-1 sm:rounded-2xl sm:border-[3px] md:flex-[1.55] {{ $highlight ? 'tv-highlight' : '' }}"
                     wire:key="current-call-{{ $currentCall['id'] ?? 'none' }}"
                 >
                     <div class="shrink-0 bg-primary px-3 py-1.5 text-center sm:px-4 sm:py-2.5 md:py-3">
                         <h2 class="text-xs font-bold uppercase tracking-[0.18em] text-white sm:text-sm sm:tracking-[0.22em] md:text-base lg:text-lg">Senha atual</h2>
                     </div>
 
-                    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-3 py-3 text-center sm:gap-3 sm:px-5 sm:py-5 md:gap-3.5 md:px-6 md:py-6">
+                    <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-2 py-2 text-center sm:gap-2.5 sm:px-4 sm:py-4 md:gap-3 md:px-5 md:py-5">
                         @if ($currentCall)
-                            <p class="tv-code {{ $highlight ? 'tv-code-pulse' : '' }} w-full font-bold tracking-tight text-danger">
+                            <p class="tv-code {{ $highlight ? 'tv-code-pulse' : '' }} w-full shrink-0 font-bold tracking-tight text-danger">
                                 {{ $currentCall['display_code'] }}
                             </p>
-                            <div class="h-0.5 w-14 shrink-0 bg-danger/50 sm:w-20 md:w-28" aria-hidden="true"></div>
-                            <p class="tv-desk font-bold uppercase tracking-wide text-primary">
+                            <div class="h-0.5 w-16 shrink-0 bg-danger/50 sm:w-24 md:w-32" aria-hidden="true"></div>
+                            <p class="tv-desk shrink-0 font-bold uppercase tracking-wide text-primary">
                                 {{ $currentCall['desk_name'] }}
                             </p>
                             @if ($showTicketType)
-                                <p class="text-[0.7rem] font-medium leading-snug text-text-muted sm:text-sm md:text-base">
+                                <p class="shrink-0 text-[0.7rem] font-medium leading-snug text-text-muted sm:text-sm md:text-base">
                                     {{ $currentCall['ticket_type_name'] }}
                                 </p>
                             @endif
                         @else
                             <p class="tv-code w-full font-bold text-primary/30">—</p>
-                            <div class="h-0.5 w-14 shrink-0 bg-border sm:w-20" aria-hidden="true"></div>
+                            <div class="h-0.5 w-16 shrink-0 bg-border sm:w-24" aria-hidden="true"></div>
                             <p class="text-sm font-semibold uppercase tracking-wide text-text-muted sm:text-lg md:text-xl">Aguardando chamada</p>
                         @endif
                     </div>
                 </section>
 
                 {{-- RECENT CALLS --}}
-                <section class="flex min-h-0 flex-col overflow-hidden rounded-xl border-2 border-primary bg-surface max-md:order-2 sm:rounded-2xl sm:border-[3px] md:flex-1">
+                <section class="flex min-h-0 flex-col overflow-hidden rounded-xl border-2 border-primary bg-surface max-md:order-2 sm:rounded-2xl sm:border-[3px] md:flex-[0.85]">
                     <div class="shrink-0 bg-primary px-3 py-1.5 text-center sm:px-4 sm:py-2.5 md:py-3">
                         <h2 class="text-xs font-bold uppercase tracking-[0.18em] text-white sm:text-sm sm:tracking-[0.22em] md:text-base lg:text-lg">Últimas chamadas</h2>
                     </div>

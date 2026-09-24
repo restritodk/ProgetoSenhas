@@ -14,8 +14,8 @@
             --tv-footer-h: clamp(3rem, 10vh, 5.75rem);
             --tv-gap: clamp(0.4rem, 0.9vw, 1rem);
             --tv-pad: clamp(0.4rem, 1vw, 1rem);
-            --tv-code: clamp(3.75rem, 14.5vmin, 11.75rem);
-            --tv-desk: clamp(1.35rem, 5vmin, 3.35rem);
+            --tv-code: clamp(5rem, 18vmin, 15rem);
+            --tv-desk: clamp(1.55rem, 5.5vmin, 3.75rem);
             --tv-history: clamp(0.95rem, 2.4vmin, 1.65rem);
             --tv-time: clamp(1.35rem, 4vmin, 2.75rem);
             --tv-logo-h: clamp(3rem, 9vh, 5.5rem);
@@ -52,11 +52,12 @@
 
         .tv-code {
             font-size: var(--tv-code);
-            line-height: 0.92;
+            line-height: 0.88;
             max-width: 100%;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            letter-spacing: -0.02em;
         }
 
         .tv-desk {
@@ -76,8 +77,8 @@
         /* Tablets e notebooks em paisagem / TVs menores */
         @media (min-width: 768px) and (min-height: 560px) {
             :root {
-                --tv-code: clamp(4.4rem, 13.5vmin, 11.75rem);
-                --tv-desk: clamp(1.6rem, 4.5vmin, 3.35rem);
+                --tv-code: clamp(5.75rem, 16.5vmin, 15rem);
+                --tv-desk: clamp(1.85rem, 5vmin, 3.75rem);
             }
         }
 
@@ -86,8 +87,8 @@
             :root {
                 --tv-header-h: clamp(5.5rem, 12vh, 8rem);
                 --tv-footer-h: clamp(4.25rem, 11vh, 6.25rem);
-                --tv-code: clamp(6.75rem, 12.8vmin, 13.5rem);
-                --tv-desk: clamp(2.05rem, 4.25vmin, 3.85rem);
+                --tv-code: clamp(8.5rem, 16vmin, 17.5rem);
+                --tv-desk: clamp(2.35rem, 4.8vmin, 4.35rem);
                 --tv-history: clamp(1.15rem, 2.2vmin, 1.85rem);
                 --tv-time: clamp(2rem, 3.8vmin, 3.1rem);
                 --tv-logo-h: clamp(4rem, 9vh, 5.75rem);
@@ -148,8 +149,8 @@
         /* 4K / painéis muito grandes */
         @media (min-width: 2560px) {
             :root {
-                --tv-code: clamp(9.5rem, 11.5vmin, 16rem);
-                --tv-desk: clamp(2.65rem, 3.8vmin, 4.75rem);
+                --tv-code: clamp(12rem, 14vmin, 22rem);
+                --tv-desk: clamp(3rem, 4.2vmin, 5.25rem);
                 --tv-history: clamp(1.35rem, 2vmin, 2.25rem);
                 --tv-time: clamp(2.5rem, 3.2vmin, 3.75rem);
             }
@@ -160,8 +161,8 @@
             :root {
                 --tv-header-h: clamp(4rem, 11vh, 5.5rem);
                 --tv-footer-h: clamp(2.75rem, 8.5vh, 4rem);
-                --tv-code: clamp(3.5rem, 16vw, 6.75rem);
-                --tv-desk: clamp(1.35rem, 6vw, 2.35rem);
+                --tv-code: clamp(4.25rem, 18vw, 8rem);
+                --tv-desk: clamp(1.5rem, 6.5vw, 2.6rem);
                 --tv-logo-h: clamp(2.25rem, 7vh, 3.5rem);
                 --tv-logo-w: clamp(9rem, 48vw, 16rem);
             }
@@ -172,8 +173,8 @@
             :root {
                 --tv-header-h: 3.5rem;
                 --tv-footer-h: 2.5rem;
-                --tv-code: clamp(2.5rem, 18vh, 5rem);
-                --tv-desk: clamp(1.15rem, 7vh, 1.9rem);
+                --tv-code: clamp(3rem, 20vh, 6rem);
+                --tv-desk: clamp(1.25rem, 7.5vh, 2.1rem);
                 --tv-history: clamp(0.8rem, 4.5vh, 1.15rem);
                 --tv-time: clamp(1.1rem, 7vh, 1.75rem);
                 --tv-logo-h: 2rem;
