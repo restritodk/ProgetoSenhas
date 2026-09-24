@@ -22,6 +22,7 @@ use App\Http\Controllers\SectorController;
 use App\Http\Controllers\TicketIssueController;
 use App\Http\Controllers\TicketTypeController;
 use App\Http\Controllers\TvPanelController;
+use App\Http\Controllers\TvTtsController;
 use App\Http\Controllers\UnitTicketTypeController;
 use App\Http\Controllers\UserController;
 use App\Support\PublicAccessCode;
@@ -40,6 +41,12 @@ Route::get('/painel/{publicToken}', TvPanelController::class)
     ->where('publicToken', PublicAccessCode::panelRoutePattern())
     ->middleware('throttle:tv-page')
     ->name('tv.panel');
+
+Route::get('/painel/{publicToken}/tts/{ticketCall}', TvTtsController::class)
+    ->where('publicToken', PublicAccessCode::panelRoutePattern())
+    ->whereNumber('ticketCall')
+    ->middleware('throttle:tv-tts')
+    ->name('tv.tts');
 
 Route::get('/totem/{publicToken}', KioskPanelController::class)
     ->where('publicToken', PublicAccessCode::kioskRoutePattern())

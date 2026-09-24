@@ -404,15 +404,24 @@
                     panel.lastPlayedCallId = callId;
                 }
 
+                // One utterance at a time for this panel tab.
+                this.stopSpeech(panel);
+
                 window.dispatchEvent(new CustomEvent('tv-call-audio-begin', { detail: { panelToken: token, callId } }));
 
                 const finish = () => {
+                    panel.speaking = false;
                     window.dispatchEvent(new CustomEvent('tv-call-audio-end', { detail: { panelToken: token, callId } }));
                 };
 
                 const runSpeech = () => {
                     if (panel.clinicSpeechEnabled) {
-                        this.speak(panel, payload.announcement || '', finish);
+                        this.speak(
+                            panel,
+                            payload.announcement || '',
+                            finish,
+                            payload.audioUrl || payload.audio_url || null
+                        );
                     } else {
                         finish();
                     }
@@ -451,31 +460,168 @@
                 }
             },
 
-            speak(panel, text, onEnd) {
-                if (!text || !('speechSynthesis' in window)) {
+            stopSpeech(panel) {
+                try {
+                    if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                    }
+                } catch (e) {}
+                this.stopFallbackAudio(panel);
+                panel.speaking = false;
+                panel._speechStarted = false;
+                if (panel._speechProbeTimer) {
+                    clearTimeout(panel._speechProbeTimer);
+                    panel._speechProbeTimer = null;
+                }
+            },
+
+            stopFallbackAudio(panel) {
+                if (panel.fallbackAudio) {
+                    try {
+                        panel.fallbackAudio.onended = null;
+                        panel.fallbackAudio.onerror = null;
+                        panel.fallbackAudio.pause();
+                        panel.fallbackAudio.removeAttribute('src');
+                        panel.fallbackAudio.load();
+                    } catch (e) {}
+                    panel.fallbackAudio = null;
+                }
+            },
+
+            /**
+             * Prefer speechSynthesis when it actually starts speaking.
+             * Samsung Tizen often exposes the API but does not start — fall back to <audio> WAV.
+             */
+            speak(panel, text, onEnd, audioUrl) {
+                const safeEnd = () => {
+                    panel.speaking = false;
                     if (typeof onEnd === 'function') {
                         onEnd();
                     }
+                };
+
+                if (!text) {
+                    safeEnd();
                     return;
                 }
-                window.speechSynthesis.cancel();
+
+                const playFallback = () => {
+                    if (!audioUrl) {
+                        safeEnd();
+                        return;
+                    }
+                    this.playAudioUrl(panel, audioUrl, safeEnd);
+                };
+
+                if (!('speechSynthesis' in window)) {
+                    playFallback();
+                    return;
+                }
+
+                try {
+                    window.speechSynthesis.cancel();
+                } catch (e) {}
+
+                this.stopFallbackAudio(panel);
+
+                let settled = false;
+                panel.speaking = true;
+                panel._speechStarted = false;
+
                 const utterance = new SpeechSynthesisUtterance(text);
                 utterance.lang = 'pt-BR';
                 utterance.rate = 0.95;
-                panel.speaking = true;
+
+                const settleNative = () => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    if (panel._speechProbeTimer) {
+                        clearTimeout(panel._speechProbeTimer);
+                        panel._speechProbeTimer = null;
+                    }
+                    safeEnd();
+                };
+
+                const settleFallback = () => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    if (panel._speechProbeTimer) {
+                        clearTimeout(panel._speechProbeTimer);
+                        panel._speechProbeTimer = null;
+                    }
+                    try {
+                        window.speechSynthesis.cancel();
+                    } catch (e) {}
+                    playFallback();
+                };
+
+                utterance.onstart = () => {
+                    panel._speechStarted = true;
+                    if (panel._speechProbeTimer) {
+                        clearTimeout(panel._speechProbeTimer);
+                        panel._speechProbeTimer = null;
+                    }
+                };
+
                 utterance.onend = () => {
-                    panel.speaking = false;
-                    if (typeof onEnd === 'function') {
-                        onEnd();
+                    if (!panel._speechStarted) {
+                        // Instant end without start → API is a stub (common on Samsung).
+                        settleFallback();
+                        return;
                     }
+                    settleNative();
                 };
+
                 utterance.onerror = () => {
+                    settleFallback();
+                };
+
+                // If onstart does not fire, treat as non-functional TTS.
+                panel._speechProbeTimer = setTimeout(() => {
+                    if (!panel._speechStarted) {
+                        settleFallback();
+                    }
+                }, 1200);
+
+                try {
+                    window.speechSynthesis.speak(utterance);
+                } catch (e) {
+                    settleFallback();
+                }
+            },
+
+            playAudioUrl(panel, url, onEnd) {
+                this.stopFallbackAudio(panel);
+                panel.speaking = true;
+
+                const audio = new Audio();
+                panel.fallbackAudio = audio;
+                audio.preload = 'auto';
+
+                const done = () => {
                     panel.speaking = false;
+                    panel.fallbackAudio = null;
                     if (typeof onEnd === 'function') {
                         onEnd();
                     }
                 };
-                window.speechSynthesis.speak(utterance);
+
+                audio.onended = done;
+                audio.onerror = done;
+
+                try {
+                    audio.src = url;
+                    const playPromise = audio.play();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                        playPromise.catch(() => done());
+                    }
+                } catch (e) {
+                    done();
+                }
             },
         };
     })();

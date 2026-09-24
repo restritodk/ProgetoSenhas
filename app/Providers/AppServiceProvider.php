@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Contracts\TvSpeechSynthesizer;
 use App\Models\ClinicSetting;
 use App\Models\Desk;
 use App\Models\DisplayPanel;
@@ -15,6 +16,7 @@ use App\Services\ClinicBranding;
 use App\Services\ClinicMessageInbox;
 use App\Services\ClinicSettings;
 use App\Services\OperationalContext;
+use App\Services\TvTts\EspeakNgSynthesizer;
 use App\Support\AdminNavigation;
 use App\Support\AdminPresentation;
 use App\Support\AttendantNavigation;
@@ -31,7 +33,7 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        $this->app->bind(TvSpeechSynthesizer::class, EspeakNgSynthesizer::class);
     }
 
     public function boot(): void
@@ -49,6 +51,10 @@ class AppServiceProvider extends ServiceProvider
         // TV polling (~3s) + media (~45s); allow headroom without aiding brute-force of short codes.
         RateLimiter::for('tv-page', function (Request $request): Limit {
             return Limit::perMinute(120)->by($request->ip());
+        });
+
+        RateLimiter::for('tv-tts', function (Request $request): Limit {
+            return Limit::perMinute(60)->by($request->ip());
         });
 
         foreach (PermissionCatalog::keys() as $permissionKey) {

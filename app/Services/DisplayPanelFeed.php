@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\DisplayPanel;
 use App\Models\TicketCall;
+use App\Services\TvTts\TvTtsService;
 use App\Support\ClinicSettingCatalog;
 use App\Support\LogoSurface;
 use App\Support\TvPresentation;
@@ -15,6 +16,7 @@ class DisplayPanelFeed
         private TicketCallVoiceFormatter $voiceFormatter,
         private ClinicSettings $clinicSettings,
         private ClinicBranding $clinicBranding,
+        private TvTtsService $tvTts,
     ) {}
 
     public function findByPublicToken(string $publicToken): ?DisplayPanel
@@ -95,10 +97,10 @@ class DisplayPanelFeed
             'unit_name' => $panel->unit->name,
             'presentation' => $presentation,
             'current_call' => $current !== null
-                ? $this->mapCall($current, true, $speakType, $speakDesk)
+                ? $this->mapCall($panel, $current, true, $speakType, $speakDesk)
                 : null,
             'recent_calls' => $recent
-                ->map(fn (TicketCall $call): array => $this->mapCall($call, false, $speakType, $speakDesk))
+                ->map(fn (TicketCall $call): array => $this->mapCall($panel, $call, false, $speakType, $speakDesk))
                 ->values()
                 ->all(),
         ];
@@ -163,8 +165,13 @@ class DisplayPanelFeed
     /**
      * @return array<string, mixed>
      */
-    private function mapCall(TicketCall $call, bool $includeAnnouncement, bool $speakType, bool $speakDesk): array
-    {
+    private function mapCall(
+        DisplayPanel $panel,
+        TicketCall $call,
+        bool $includeAnnouncement,
+        bool $speakType,
+        bool $speakDesk,
+    ): array {
         $payload = [
             'id' => $call->id,
             'display_code' => $call->ticket?->display_code ?? '—',
@@ -178,6 +185,7 @@ class DisplayPanelFeed
 
         if ($includeAnnouncement) {
             $payload['announcement'] = $this->voiceFormatter->announce($call, $speakType, $speakDesk);
+            $payload['audio_url'] = $this->tvTts->audioUrlForCall($panel, $call);
         }
 
         return $payload;

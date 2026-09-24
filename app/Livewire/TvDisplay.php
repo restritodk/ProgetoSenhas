@@ -80,6 +80,9 @@ class TvDisplay extends Component
                 $this->highlight = true;
                 $announcement = (string) ($newCall['announcement'] ?? '');
                 $displayCode = (string) ($newCall['display_code'] ?? '');
+                $audioUrl = isset($newCall['audio_url']) && is_string($newCall['audio_url'])
+                    ? $newCall['audio_url']
+                    : null;
 
                 // Livewire browser event (tests + any listeners).
                 $this->dispatch(
@@ -87,6 +90,7 @@ class TvDisplay extends Component
                     callId: $newCallId,
                     announcement: $announcement,
                     displayCode: $displayCode,
+                    audioUrl: $audioUrl,
                 );
 
                 // Deliver AFTER DOM morph so Alpine remounts cannot swallow the announce.
@@ -98,6 +102,7 @@ class TvDisplay extends Component
                         'callId' => $newCallId,
                         'announcement' => $announcement,
                         'displayCode' => $displayCode,
+                        'audioUrl' => $audioUrl,
                     ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)
                     .')'
                 );
