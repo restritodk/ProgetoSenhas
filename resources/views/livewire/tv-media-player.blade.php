@@ -10,7 +10,6 @@
         wire:ignore
         class="relative h-full w-full"
         x-data="tvMediaPlayer(@js($items))"
-        x-init="init()"
         x-on:tv-playlist-updated.window="setItems(($event.detail && $event.detail.items) ? $event.detail.items : [])"
     >
         <div class="absolute inset-0 overflow-hidden bg-gradient-to-br from-primary via-primary-light to-primary-dark">
@@ -42,14 +41,18 @@
                 <div class="absolute inset-0 h-full w-full bg-black">
                     <video
                         x-ref="localVideo"
+                        x-init="onVideoElementCreated($el)"
                         :src="current.url"
                         class="h-full w-full object-cover"
                         autoplay
                         playsinline
                         muted
                         x-on:loadeddata="onLocalVideoReady()"
+                        x-on:playing="onLocalVideoPlaying($event)"
+                        x-on:pause="onLocalVideoPaused($event)"
+                        x-on:timeupdate="onLocalVideoTimeUpdate($event)"
                         x-on:ended="onLocalVideoEnded()"
-                        x-on:error="failCurrent('video-error')"
+                        x-on:error="onLocalVideoError()"
                     ></video>
                 </div>
             </template>
@@ -75,6 +78,26 @@
 </div>
 
 <script>
+    // Debug-only probe (APP_DEBUG=true): proves whether a Livewire morph ever removes the playback surface.
+    if (@js((bool) config('app.debug')) && !window.__humanaTvMorphProbe) {
+        window.__humanaTvMorphProbe = true;
+        document.addEventListener('livewire:init', function () {
+            try {
+                window.Livewire.hook('commit', function (hookArgs) {
+                    hookArgs.succeed(function () {
+                        window.console.info('[TV Poll]', hookArgs.component && hookArgs.component.name, new Date().toISOString());
+                    });
+                });
+                window.Livewire.hook('morph.removed', function (hookArgs) {
+                    const el = hookArgs && hookArgs.el;
+                    if (el && el.nodeType === 1 && (el.matches('video, iframe') || el.querySelector('video, iframe'))) {
+                        window.console.warn('[TV Media] morph removed a media element', el);
+                    }
+                });
+            } catch (e) {}
+        });
+    }
+
     function tvMediaPlayer(initialItems = []) {
         return {
             items: Array.isArray(initialItems) ? initialItems : [],
@@ -91,6 +114,15 @@
             playbackToken: 0,
             advancing: false,
             callDucked: false,
+            callAudioActive: false,
+            videoErrorDuringCall: false,
+            videoRecovering: false,
+            lastVideoTime: 0,
+            interruptionTimer: null,
+            interruptionCount: 0,
+            interruptionWindowStart: 0,
+            videoElementSeq: 0,
+            debug: @js((bool) config('app.debug')),
             autoplayAudioBlocked: false,
             clinicLabel: @js($clinicName !== '' ? $clinicName : config('app.name')),
             get hasItems() {
@@ -178,6 +210,17 @@
                 this.applyMediaAudio();
                 this.enforceConfiguredMute();
             },
+            playbackSnapshot() {
+                const item = this.current;
+                const video = item && item.type === 'video' ? this.$refs.localVideo : null;
+                return {
+                    id: item ? item.id : null,
+                    type: item ? item.type : null,
+                    seq: video ? video.__tvMediaSeq : null,
+                    currentTime: video ? video.currentTime : null,
+                    paused: video ? video.paused : null,
+                };
+            },
             playlistFingerprint(items) {
                 return JSON.stringify(Array.isArray(items) ? items : []);
             },
@@ -217,6 +260,7 @@
 
                 const current = this.current;
                 const currentId = current ? current.id : null;
+                this.debugLog('playlist updated', { count: nextItems.length, currentId: currentId });
                 const nextPlayable = nextItems.filter((item) => {
                     if (!item) {
                         return false;
@@ -267,9 +311,13 @@
             },
             activateCurrent() {
                 this.clearMediaTimers();
+                this.clearInterruptionTimer();
+                this.videoErrorDuringCall = false;
+                this.videoRecovering = false;
                 this.autoplayAudioBlocked = false;
                 const token = this.bumpPlaybackToken();
                 const item = this.current;
+                this.debugLog('activate media', item ? { id: item.id, type: item.type, url: item.url || item.video_id } : null);
                 if (!item) {
                     this.destroyYouTube();
                     this.advancing = false;
@@ -356,6 +404,7 @@
                 if (!item || item.type !== 'video' || !video) {
                     return;
                 }
+                this.videoRecovering = false;
                 // Always start muted for autoplay policy, then apply media audio config.
                 video.muted = true;
                 const start = video.play();
@@ -374,7 +423,178 @@
                 if (!item || item.type !== 'video') {
                     return;
                 }
+                this.debugLog('video ended', { id: item.id });
                 this.advanceToNextMedia('VIDEO_ENDED');
+            },
+            debugLog(message, detail) {
+                if (!this.debug) {
+                    return;
+                }
+                try {
+                    window.console.info('[TV Media]', message, detail !== undefined ? detail : '');
+                } catch (e) {}
+            },
+            onVideoElementCreated(el) {
+                this.videoElementSeq += 1;
+                el.__tvMediaSeq = this.videoElementSeq;
+                this.lastVideoTime = 0;
+                this.debugLog('video element created', {
+                    seq: this.videoElementSeq,
+                    id: this.current ? this.current.id : null,
+                    src: this.current ? this.current.url : null,
+                });
+            },
+            onLocalVideoPlaying(event) {
+                const video = event && event.target;
+                this.debugLog('video playing', {
+                    seq: video ? video.__tvMediaSeq : null,
+                    currentTime: video ? video.currentTime : null,
+                });
+            },
+            onLocalVideoTimeUpdate(event) {
+                const video = event && event.target;
+                if (video && video === this.$refs.localVideo) {
+                    this.lastVideoTime = video.currentTime || 0;
+                }
+            },
+            /**
+             * Some TV browsers pause a <video> when another media element (call audio)
+             * starts, or on Android when audio focus moves. Nothing here pauses the video,
+             * so a pause that is not "ended" is external: continue the SAME element later.
+             */
+            onLocalVideoPaused(event) {
+                const video = event && event.target;
+                if (!video || video !== this.$refs.localVideo || !video.isConnected) {
+                    this.debugLog('video paused (element detached)', { seq: video ? video.__tvMediaSeq : null });
+                    return;
+                }
+                // readyState < 2: pause emitted by the load algorithm itself, not an interruption.
+                if (video.ended || this.advancing || video.readyState < 2) {
+                    return;
+                }
+                this.debugLog('video paused externally', {
+                    seq: video.__tvMediaSeq,
+                    currentTime: video.currentTime,
+                    callAudioActive: this.callAudioActive,
+                });
+                this.onExternalInterruption();
+            },
+            onLocalVideoError() {
+                if (this.callAudioActive && !this.videoRecovering) {
+                    // Decoder may be taken by the call audio on single-pipeline TVs; retry after the call.
+                    this.videoErrorDuringCall = true;
+                    this.debugLog('video error during call — retry after call', { lastVideoTime: this.lastVideoTime });
+                    return;
+                }
+                this.videoRecovering = false;
+                this.failCurrent('video-error');
+            },
+            onExternalInterruption() {
+                if (this.callAudioActive) {
+                    // Resuming now would fight the call audio for the media pipeline.
+                    return;
+                }
+                if (this.interruptionTimer) {
+                    return;
+                }
+                const now = Date.now();
+                if (now - this.interruptionWindowStart > 60000) {
+                    this.interruptionWindowStart = now;
+                    this.interruptionCount = 0;
+                }
+                if (this.interruptionCount >= 5) {
+                    this.debugLog('interruption recovery limit reached');
+                    return;
+                }
+                this.interruptionCount += 1;
+                const token = this.playbackToken;
+                this.interruptionTimer = setTimeout(() => {
+                    this.interruptionTimer = null;
+                    if (this.playbackToken === token && !this.callAudioActive) {
+                        this.continueAfterInterruption();
+                    }
+                }, 1500);
+            },
+            clearInterruptionTimer() {
+                if (this.interruptionTimer) {
+                    clearTimeout(this.interruptionTimer);
+                    this.interruptionTimer = null;
+                }
+            },
+            /**
+             * Continue the current media without remount, src change or seek.
+             */
+            continueAfterInterruption() {
+                const item = this.current;
+                if (!item || this.advancing) {
+                    return;
+                }
+
+                if (item.type === 'video') {
+                    const video = this.$refs.localVideo;
+                    if (!video) {
+                        return;
+                    }
+                    if (this.videoErrorDuringCall) {
+                        this.videoErrorDuringCall = false;
+                        this.reloadVideoAfterDecoderLoss(video);
+                        return;
+                    }
+                    if (!video.paused || video.ended) {
+                        return;
+                    }
+                    this.debugLog('video continue', { seq: video.__tvMediaSeq, currentTime: video.currentTime });
+                    const attempt = video.play();
+                    if (attempt && typeof attempt.then === 'function') {
+                        attempt.then(() => this.applyMediaAudio()).catch(() => {
+                            video.muted = true;
+                            video.play().catch(() => {});
+                        });
+                    } else {
+                        this.applyMediaAudio();
+                    }
+                    return;
+                }
+
+                if (item.type === 'youtube' && this.ytPlayer && this.ytMountedId === item.id) {
+                    try {
+                        const state = typeof this.ytPlayer.getPlayerState === 'function'
+                            ? this.ytPlayer.getPlayerState()
+                            : null;
+                        if (state === 2) {
+                            this.debugLog('youtube continue', { id: item.id });
+                            this.ytPlayer.playVideo();
+                        }
+                    } catch (e) {}
+                }
+            },
+            /**
+             * Last resort when the TV dropped the decoder (error event) during a call:
+             * reload the same src once and seek back. A second error fails the item normally.
+             */
+            reloadVideoAfterDecoderLoss(video) {
+                const resumeAt = this.lastVideoTime;
+                const token = this.playbackToken;
+                this.videoRecovering = true;
+                this.debugLog('video reload after decoder loss', { resumeAt: resumeAt });
+                const onMeta = () => {
+                    video.removeEventListener('loadedmetadata', onMeta);
+                    if (this.playbackToken !== token) {
+                        return;
+                    }
+                    try {
+                        if (resumeAt > 0 && isFinite(video.duration) && resumeAt < video.duration) {
+                            video.currentTime = resumeAt;
+                        }
+                    } catch (e) {}
+                };
+                video.addEventListener('loadedmetadata', onMeta);
+                try {
+                    video.load();
+                } catch (e) {
+                    this.videoRecovering = false;
+                    this.failCurrent('video-error');
+                }
             },
             applyMediaAudio() {
                 const item = this.current;
@@ -757,6 +977,10 @@
                                         } catch (e) {}
                                     }
                                 }
+                                if (event.data === YT.PlayerState.PAUSED) {
+                                    this.debugLog('youtube paused externally', { id: item.id, callAudioActive: this.callAudioActive });
+                                    this.onExternalInterruption();
+                                }
                                 if (event.data === YT.PlayerState.ENDED) {
                                     this.advanceToNextMedia('YOUTUBE_ENDED');
                                 }
@@ -779,12 +1003,18 @@
                 // Temporary mute-duck during call effect only — no pause/remount/playlist advance.
                 // Restore uses play_with_audio === true (SEM ÁUDIO stays muted; COM ÁUDIO may unmute).
                 this._onCallBegin = () => {
+                    this.callAudioActive = true;
+                    this.clearInterruptionTimer();
+                    this.debugLog('call begin', this.playbackSnapshot());
                     this.callDucked = true;
                     this.applyMediaAudio();
                     this.enforceConfiguredMute();
                 };
                 this._onCallEnd = () => {
+                    this.callAudioActive = false;
+                    this.debugLog('call end', this.playbackSnapshot());
                     this.restoreMediaAudioAfterCall();
+                    this.continueAfterInterruption();
                 };
                 window.addEventListener('tv-call-audio-begin', this._onCallBegin);
                 window.addEventListener('tv-call-audio-end', this._onCallEnd);

@@ -39,5 +39,8 @@
         <env name="BOOTSTRAP_CLINIC_SLUG" value="clinica-principal"/>
         <env name="BOOTSTRAP_UNIT_NAME" value="Unidade principal"/>
         <env name="BOOTSTRAP_UNIT_SLUG" value="unidade-principal"/>
+        <env name="TV_TTS_DRIVER" value="espeak"/>
+        <env name="GOOGLE_APPLICATION_CREDENTIALS" value=""/>
+        <env name="GOOGLE_TTS_LANGUAGE" value="pt-BR"/>
     </php>
 </phpunit>

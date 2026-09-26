@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    /*
+    | Google Cloud Text-to-Speech. The JSON key stays on the server.
+    | GOOGLE_APPLICATION_CREDENTIALS is an absolute path, never the file contents.
+    */
+    'google_tts' => [
+        'credentials' => env('GOOGLE_APPLICATION_CREDENTIALS'),
+        'language_code' => env('GOOGLE_TTS_LANGUAGE', 'pt-BR'),
+        'voice_name' => env('GOOGLE_TTS_VOICE', ''),
+        'speaking_rate' => (float) env('GOOGLE_TTS_SPEAKING_RATE', 1.0),
+    ],
+
 ];

@@ -14,7 +14,10 @@ use Illuminate\Validation\ValidationException;
 
 class RecallTicket
 {
-    public function __construct(private OperationalContext $operationalContext) {}
+    public function __construct(
+        private OperationalContext $operationalContext,
+        private WarmTicketCallAnnouncementAudio $announcementAudio,
+    ) {}
 
     public function handle(User $actor, Ticket $ticket): Ticket
     {
@@ -60,6 +63,8 @@ class RecallTicket
                 'call_type' => TicketCallType::RECALL,
                 'called_at' => $calledAt,
             ])->save();
+
+            $this->announcementAudio->schedule($call);
 
             return $locked->refresh()->load(['ticketType', 'currentDesk']);
         });

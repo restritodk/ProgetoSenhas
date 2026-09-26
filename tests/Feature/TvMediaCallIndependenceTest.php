@@ -53,6 +53,26 @@ class TvMediaCallIndependenceTest extends TestCase
         $this->assertStringNotContainsString('pauseVideo', $html);
         $this->assertStringNotContainsString('stopVideo', $html);
         $this->assertStringNotContainsString('video.pause(', $html);
+        // External pauses (TV audio focus) continue the same element after the call.
+        $this->assertStringContainsString('onExternalInterruption', $html);
+        $this->assertStringContainsString('continueAfterInterruption', $html);
+        $this->assertStringNotContainsString('location.reload', $html);
+    }
+
+    public function test_call_audio_queue_is_guarded_against_stalls_and_duplicates(): void
+    {
+        $panel = $this->panelWithPlaylist();
+
+        $html = Livewire::test(TvDisplay::class, [
+            'publicToken' => $panel->public_token,
+        ])->html();
+
+        $this->assertStringContainsString('MAX_CALL_MS', $html);
+        $this->assertStringContainsString('LOAD_TIMEOUT_MS', $html);
+        $this->assertStringContainsString('playedIds', $html);
+        $this->assertStringContainsString('isCurrentItem', $html);
+        $this->assertStringContainsString('tv-call-audio-blocked', $html);
+        $this->assertStringNotContainsString('location.reload', $html);
     }
 
     public function test_tv_display_isolates_media_island_from_call_updates(): void

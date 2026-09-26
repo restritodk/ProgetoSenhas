@@ -7,7 +7,11 @@ interface TvSpeechSynthesizer
     public function isAvailable(): bool;
 
     /**
-     * Synthesize spoken audio as WAV binary (PCM). Empty string on failure.
+     * Spoken audio bytes (WAV or MP3, see fileExtension()). Empty string on failure.
      */
     public function synthesizeWav(string $text): string;
+
+    public function fileExtension(): string;
+
+    public function contentType(): string;
 }

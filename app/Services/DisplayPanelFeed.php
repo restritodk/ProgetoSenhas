@@ -100,7 +100,7 @@ class DisplayPanelFeed
                 ? $this->mapCall($panel, $current, true, $speakType, $speakDesk)
                 : null,
             'recent_calls' => $recent
-                ->map(fn (TicketCall $call): array => $this->mapCall($panel, $call, false, $speakType, $speakDesk))
+                ->map(fn (TicketCall $call): array => $this->mapCall($panel, $call, true, $speakType, $speakDesk))
                 ->values()
                 ->all(),
         ];

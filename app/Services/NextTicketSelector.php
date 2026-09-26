@@ -20,15 +20,15 @@ class NextTicketSelector
      * Normal (10) reaches Preferencial (20) after 2 minutes and Emergencial (30) after 4 minutes
      * with the default 60s / +5 configuration.
      */
-    public const int AGING_INTERVAL_SECONDS = 60;
+    public const AGING_INTERVAL_SECONDS = 60;
 
-    public const int AGING_BONUS_PER_INTERVAL = 5;
+    public const AGING_BONUS_PER_INTERVAL = 5;
 
     /**
      * Large boost applied when a ticket exceeds its configured rescue wait.
      * Ensures rescued tickets win among non-critical candidates without claiming a hard SLA.
      */
-    public const int RESCUE_PRIORITY_BOOST = 10_000;
+    public const RESCUE_PRIORITY_BOOST = 10_000;
 
     public function __construct(
         private UnitQueuePolicyResolver $policyResolver,

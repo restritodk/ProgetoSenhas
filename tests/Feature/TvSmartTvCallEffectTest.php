@@ -54,8 +54,9 @@ class TvSmartTvCallEffectTest extends TestCase
             || str_contains($html, '&quot;isSmartTv&quot;:true'),
             'Smart TV flag must be true in the audio UI bootstrap payload'
         );
-        // Hard guards against speech/TTS on the Smart TV branch.
-        $this->assertStringContainsString('Smart TV: MP3 effect only', $html);
+        // Smart TV plays the ding, then the server audio. It must not call speechSynthesis.
+        $this->assertStringContainsString('Never speechSynthesis on this branch', $html);
+        $this->assertStringContainsString('playNext', $html);
     }
 
     public function test_desktop_panel_does_not_embed_smart_tv_effect_element(): void

@@ -37,6 +37,16 @@ class EspeakNgSynthesizer implements TvSpeechSynthesizer
         });
     }
 
+    public function fileExtension(): string
+    {
+        return 'wav';
+    }
+
+    public function contentType(): string
+    {
+        return 'audio/wav';
+    }
+
     public function synthesizeWav(string $text): string
     {
         $text = trim($text);

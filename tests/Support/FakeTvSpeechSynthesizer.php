@@ -11,6 +11,10 @@ class FakeTvSpeechSynthesizer implements TvSpeechSynthesizer
 {
     public bool $available = true;
 
+    public string $extension = 'wav';
+
+    public string $mimeType = 'audio/wav';
+
     public int $synthesizeCalls = 0;
 
     /** @var list<string> */
@@ -19,6 +23,16 @@ class FakeTvSpeechSynthesizer implements TvSpeechSynthesizer
     public function isAvailable(): bool
     {
         return $this->available;
+    }
+
+    public function fileExtension(): string
+    {
+        return $this->extension;
+    }
+
+    public function contentType(): string
+    {
+        return $this->mimeType;
     }
 
     public function synthesizeWav(string $text): string

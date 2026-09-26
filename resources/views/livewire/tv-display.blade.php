@@ -47,7 +47,6 @@
         'effectUrl' => $smartTvEffectUrl,
         'audioDebug' => $tvAudioDebug,
     ]))"
-    x-init="init()"
 >
     {{-- Stable audio host (wire:ignore). Audio is visually hidden but NOT display:none —
         some Smart TV browsers refuse to play media inside display:none. --}}
@@ -70,6 +69,11 @@
             preload="auto"
             playsinline
             src="{{ $smartTvEffectUrl }}"
+        ></audio>
+        <audio
+            data-tv-call-speech
+            preload="auto"
+            playsinline
         ></audio>
     </div>
     {{-- HEADER --}}
@@ -138,7 +142,6 @@
                         return this.now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
                     }
                 }"
-                x-init="init()"
             >
                 @if ($showDate)
                     <p class="hidden text-[0.7rem] font-medium opacity-70 xl:block xl:text-[0.8125rem]" x-text="dateLabel()"></p>
@@ -342,6 +345,12 @@
 
         const storageKey = (token) => 'tvCallAudioUnlocked:' + token;
         const DEFAULT_EFFECT_URL = '/sond/EfeitoSonoroTV.mp3';
+        // Watchdogs: a media element that does not fire ended/error must not stall the call queue.
+        const LOAD_TIMEOUT_MS = 10000;
+        const MAX_CLIP_MS = 30000;
+        const MAX_CALL_MS = 60000;
+        const MAX_QUEUE = 20;
+        const PLAYED_HISTORY = 100;
 
         window.__humanaTvCallAudio = {
             panels: Object.create(null),
@@ -416,9 +425,18 @@
 
                 if (!this.panels[token]) {
                     this.panels[token] = {
+                        token: token,
                         soundEnabled: false,
                         speaking: false,
                         lastPlayedCallId: null,
+                        playingCallId: null,
+                        playedIds: Object.create(null),
+                        playedOrder: [],
+                        queue: [],
+                        _draining: false,
+                        _itemSeq: 0,
+                        _itemTimer: null,
+                        _audioSession: false,
                         audioCtx: null,
                         clinicChimeEnabled: options.chimeEnabled !== false,
                         clinicSpeechEnabled: options.speechEnabled !== false,
@@ -553,6 +571,22 @@
                         audio.pause();
                         audio.currentTime = 0;
                     } catch (e) {}
+                    try {
+                        const speech = this.ensureSpeechAudio(panel);
+                        speech.muted = false;
+                        speech.volume = 1;
+                        if (!speech.getAttribute('src')) {
+                            speech.src = panel.effectUrl || DEFAULT_EFFECT_URL;
+                        }
+                        const speechPlay = speech.play();
+                        if (speechPlay && typeof speechPlay.then === 'function') {
+                            await speechPlay;
+                        }
+                        speech.pause();
+                        try {
+                            speech.currentTime = 0;
+                        } catch (err) {}
+                    } catch (err) {}
                 } catch (e) {
                     panel.effectUnlocked = false;
                     this.warn('effect unlock failed', e && e.message ? e.message : e);
@@ -606,6 +640,11 @@
                 }
             },
 
+            enqueue(items) {
+                const list = Array.isArray(items) ? items : [items];
+                list.forEach((item) => this.announce(item));
+            },
+
             announce(payload) {
                 if (!payload || typeof payload !== 'object') {
                     return;
@@ -615,54 +654,178 @@
                 const callId = payload.callId != null ? Number(payload.callId) : null;
                 const panel = this.panels[token] || this.ensure(token);
 
-                if (!panel.soundEnabled) {
+                this.log('call received', { callId: callId, displayCode: payload.displayCode || '' });
+
+                if (!panel || !panel.soundEnabled) {
                     this.warn('announce skipped — sound not enabled');
                     return;
                 }
 
+                panel.queue = panel.queue || [];
+
                 // Per-instance dedupe only — other TVs keep their own cursor.
-                if (callId !== null && panel.lastPlayedCallId === callId) {
+                // Recalls create a new TicketCall id, so a recall still plays.
+                if (callId !== null) {
+                    if (panel.playingCallId === callId || panel.playedIds[callId]) {
+                        this.log('call ignored (already played)', callId);
+                        return;
+                    }
+                    if (panel.queue.some((item) => Number(item.callId) === callId)) {
+                        this.log('call ignored (already queued)', callId);
+                        return;
+                    }
+                }
+
+                if (panel.queue.length >= MAX_QUEUE) {
+                    const dropped = panel.queue.shift();
+                    this.warn('call queue full — dropping oldest', dropped ? dropped.callId : null);
+                }
+
+                panel.queue.push(payload);
+                if (!panel._draining) {
+                    this.playNext(token);
+                }
+            },
+
+            rememberPlayed(panel, callId) {
+                if (callId === null || panel.playedIds[callId]) {
                     return;
                 }
-                if (callId !== null) {
-                    panel.lastPlayedCallId = callId;
+                panel.playedIds[callId] = true;
+                panel.playedOrder.push(callId);
+                while (panel.playedOrder.length > PLAYED_HISTORY) {
+                    delete panel.playedIds[panel.playedOrder.shift()];
+                }
+            },
+
+            /**
+             * Autoplay policy rejected unmuted playback: surface "Ativar som" again
+             * instead of pretending sound is on.
+             */
+            markAudioBlocked(panel, err) {
+                if (!err || err.name !== 'NotAllowedError' || !panel.soundEnabled) {
+                    return;
+                }
+                this.warn('audio blocked by autoplay policy — operator must press "Ativar som"');
+                panel.soundEnabled = false;
+                panel.queue = [];
+                try {
+                    sessionStorage.removeItem(storageKey(panel.token));
+                } catch (e) {}
+                window.dispatchEvent(new CustomEvent('tv-call-audio-blocked', { detail: { panelToken: panel.token } }));
+            },
+
+            playNext(token) {
+                const panel = this.panels[token];
+                if (!panel) {
+                    return;
                 }
 
-                // One utterance / effect at a time for this panel tab.
-                this.stopSpeech(panel);
+                if (panel._itemTimer) {
+                    clearTimeout(panel._itemTimer);
+                    panel._itemTimer = null;
+                }
 
-                window.dispatchEvent(new CustomEvent('tv-call-audio-begin', { detail: { panelToken: token, callId } }));
+                const payload = panel.soundEnabled ? (panel.queue || []).shift() : null;
+                if (!payload) {
+                    panel.queue = panel.soundEnabled ? panel.queue : [];
+                    panel._draining = false;
+                    panel.speaking = false;
+                    panel.playingCallId = null;
+                    if (panel._audioSession) {
+                        panel._audioSession = false;
+                        this.log('call audio session end');
+                        window.dispatchEvent(new CustomEvent('tv-call-audio-end', { detail: { panelToken: token } }));
+                    }
+                    return;
+                }
+
+                panel._draining = true;
+                const callId = payload.callId != null ? Number(payload.callId) : null;
+                panel.playingCallId = callId;
+                if (callId !== null) {
+                    panel.lastPlayedCallId = callId;
+                    this.rememberPlayed(panel, callId);
+                }
+
+                if (!panel._audioSession) {
+                    panel._audioSession = true;
+                    this.log('call audio session begin', callId);
+                    window.dispatchEvent(new CustomEvent('tv-call-audio-begin', { detail: { panelToken: token, callId } }));
+                }
+
+                // Late callbacks from a previous item (timeouts, rejected promises) must not
+                // advance the queue twice or start a stale voice.
+                panel._itemSeq += 1;
+                const itemSeq = panel._itemSeq;
+                const isCurrentItem = () => panel._itemSeq === itemSeq;
+                this.log('call audio start', { callId: callId, displayCode: payload.displayCode || '' });
 
                 const finish = () => {
+                    if (!isCurrentItem()) {
+                        return;
+                    }
+                    panel._itemSeq += 1;
                     panel.speaking = false;
-                    window.dispatchEvent(new CustomEvent('tv-call-audio-end', { detail: { panelToken: token, callId } }));
+                    this.log('call audio end', callId);
+                    this.playNext(token);
                 };
 
-                // Smart TV: MP3 effect only — no speechSynthesis / robotic TTS.
+                panel._itemTimer = setTimeout(() => {
+                    if (!isCurrentItem()) {
+                        return;
+                    }
+                    this.warn('call audio watchdog — forcing next', callId);
+                    this.stopSmartTvEffect(panel);
+                    this.stopSpeechElement(panel);
+                    finish();
+                }, MAX_CALL_MS);
+
+                const audioUrl = payload.audioUrl || payload.audio_url || null;
+                const announcement = payload.announcement || '';
+
+                const playVoice = () => {
+                    if (!isCurrentItem()) {
+                        return;
+                    }
+                    if (!panel.clinicSpeechEnabled || !panel.soundEnabled) {
+                        finish();
+                        return;
+                    }
+
+                    if (audioUrl) {
+                        const onVoiceError = () => {
+                            // Smart TV: MP3 effect, then server audio. Never speechSynthesis on this branch.
+                            if (panel.isSmartTv || this.isSmartTvBrowser()) {
+                                finish();
+                                return;
+                            }
+                            this.speak(panel, announcement, finish, null);
+                        };
+                        this.playServerAudio(panel, audioUrl, finish, onVoiceError);
+                        return;
+                    }
+
+                    if (panel.isSmartTv || this.isSmartTvBrowser()) {
+                        finish();
+                        return;
+                    }
+
+                    this.speak(panel, announcement, finish, null);
+                };
+
+                // Smart TV: MP3 effect, then server audio. Never speechSynthesis on this branch.
                 if (panel.isSmartTv || this.isSmartTvBrowser()) {
                     panel.isSmartTv = true;
                     this.log('smart-tv effect selected');
-                    this.playSmartTvEffect(panel, finish);
+                    this.playSmartTvEffect(panel, playVoice);
                     return;
                 }
 
-                const runSpeech = () => {
-                    if (panel.clinicSpeechEnabled) {
-                        this.speak(
-                            panel,
-                            payload.announcement || '',
-                            finish,
-                            payload.audioUrl || payload.audio_url || null
-                        );
-                    } else {
-                        finish();
-                    }
-                };
-
                 if (panel.clinicChimeEnabled) {
-                    this.playChime(panel).then(runSpeech).catch(runSpeech);
+                    this.playChime(panel).then(playVoice).catch(playVoice);
                 } else {
-                    runSpeech();
+                    playVoice();
                 }
             },
 
@@ -688,15 +851,29 @@
                 audio.volume = 1;
 
                 let settled = false;
+                let started = false;
+                let clipTimer = null;
                 const done = (reason) => {
                     if (settled) {
                         return;
                     }
                     settled = true;
+                    if (clipTimer) {
+                        clearTimeout(clipTimer);
+                        clipTimer = null;
+                    }
                     try {
                         audio.onended = null;
                         audio.onerror = null;
                     } catch (e) {}
+                    if (reason === 'timeout') {
+                        this.warn('effect watchdog — stopping effect');
+                        try {
+                            audio.pause();
+                        } catch (e) {}
+                        safeEnd();
+                        return;
+                    }
                     if (reason === 'error') {
                         this.warn('effect error — falling back to chime');
                         this.playChime(panel).finally(safeEnd);
@@ -706,10 +883,26 @@
                     safeEnd();
                 };
 
+                const armClipWatchdog = () => {
+                    if (clipTimer) {
+                        clearTimeout(clipTimer);
+                    }
+                    const duration = Number(audio.duration);
+                    const limit = isFinite(duration) && duration > 0
+                        ? Math.min(MAX_CLIP_MS, duration * 1000 + 2000)
+                        : MAX_CLIP_MS;
+                    clipTimer = setTimeout(() => done('timeout'), limit);
+                };
+
                 const startPlay = () => {
+                    if (started || settled) {
+                        return;
+                    }
+                    started = true;
                     try {
                         audio.onended = () => done('ended');
                         audio.onerror = () => done('error');
+                        armClipWatchdog();
                         try {
                             if (typeof audio.paused === 'boolean' && !audio.paused) {
                                 audio.pause();
@@ -726,8 +919,10 @@
                         if (playPromise && typeof playPromise.then === 'function') {
                             playPromise.then(() => {
                                 panel.effectUnlocked = true;
+                                armClipWatchdog();
                             }).catch((err) => {
                                 this.warn('effect play rejected', err && err.message ? err.message : err);
+                                this.markAudioBlocked(panel, err);
                                 done('error');
                             });
                         }
@@ -791,6 +986,7 @@
                     }
                 } catch (e) {}
                 this.stopFallbackAudio(panel);
+                this.stopSpeechElement(panel);
                 this.stopSmartTvEffect(panel);
                 panel.speaking = false;
                 panel._speechStarted = false;
@@ -810,6 +1006,144 @@
                     panel.effectAudio.pause();
                     panel.effectAudio.currentTime = 0;
                 } catch (e) {}
+            },
+
+            stopSpeechElement(panel) {
+                if (!panel.speechAudio) {
+                    return;
+                }
+                try {
+                    panel.speechAudio.onended = null;
+                    panel.speechAudio.onerror = null;
+                    panel.speechAudio.pause();
+                } catch (e) {}
+            },
+
+            ensureSpeechAudio(panel) {
+                if (panel.speechAudio && panel.speechAudio.isConnected !== false) {
+                    return panel.speechAudio;
+                }
+
+                let audio = null;
+                try {
+                    audio = document.querySelector('audio[data-tv-call-speech]');
+                } catch (e) {
+                    audio = null;
+                }
+
+                if (!audio) {
+                    audio = document.createElement('audio');
+                    audio.setAttribute('data-tv-call-speech', '1');
+                    audio.preload = 'auto';
+                    audio.playsInline = true;
+                    audio.setAttribute('playsinline', '');
+                    try {
+                        document.body.appendChild(audio);
+                    } catch (e) {}
+                }
+
+                panel.speechAudio = audio;
+                return audio;
+            },
+
+            /**
+             * Server MP3/WAV for the call. Separate element from the ding so the
+             * Smart TV unlock on the effect player is left untouched.
+             */
+            playServerAudio(panel, url, onEnd, onError) {
+                const fail = () => {
+                    if (typeof onError === 'function') {
+                        onError();
+                        return;
+                    }
+                    if (typeof onEnd === 'function') {
+                        onEnd();
+                    }
+                };
+
+                if (!url) {
+                    fail();
+                    return;
+                }
+
+                let audio;
+                try {
+                    audio = this.ensureSpeechAudio(panel);
+                } catch (e) {
+                    fail();
+                    return;
+                }
+
+                // Only one call clip at a time.
+                this.stopSmartTvEffect(panel);
+
+                panel.speaking = true;
+                audio.muted = false;
+                audio.volume = 1;
+
+                let settled = false;
+                let timer = null;
+                const clearTimer = () => {
+                    if (timer) {
+                        clearTimeout(timer);
+                        timer = null;
+                    }
+                };
+                const done = (ok, reason) => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    clearTimer();
+                    try {
+                        audio.onended = null;
+                        audio.onerror = null;
+                        audio.onplaying = null;
+                    } catch (e) {}
+                    panel.speaking = false;
+                    if (ok) {
+                        this.log('voice ended');
+                        if (typeof onEnd === 'function') {
+                            onEnd();
+                        }
+                        return;
+                    }
+                    this.warn('voice failed', reason || 'error');
+                    try {
+                        audio.pause();
+                    } catch (e) {}
+                    fail();
+                };
+
+                audio.onended = () => done(true);
+                audio.onerror = () => done(false, 'media-error');
+                audio.onplaying = () => {
+                    clearTimer();
+                    const duration = Number(audio.duration);
+                    const limit = isFinite(duration) && duration > 0
+                        ? Math.min(MAX_CLIP_MS, duration * 1000 + 2000)
+                        : MAX_CLIP_MS;
+                    this.log('voice playing', { duration: isFinite(duration) ? duration : null });
+                    timer = setTimeout(() => done(true), limit);
+                };
+                timer = setTimeout(() => done(false, 'load-timeout'), LOAD_TIMEOUT_MS);
+
+                try {
+                    audio.pause();
+                } catch (e) {}
+
+                try {
+                    audio.src = url;
+                    const playPromise = audio.play();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                        playPromise.catch((err) => {
+                            this.markAudioBlocked(panel, err);
+                            done(false, err && err.name ? err.name : 'play-rejected');
+                        });
+                    }
+                } catch (e) {
+                    done(false, 'play-throw');
+                }
             },
 
             stopFallbackAudio(panel) {
@@ -939,40 +1273,7 @@
             },
 
             playAudioUrl(panel, url, onEnd) {
-                if (panel.isSmartTv || this.isSmartTvBrowser()) {
-                    if (typeof onEnd === 'function') {
-                        onEnd();
-                    }
-                    return;
-                }
-
-                this.stopFallbackAudio(panel);
-                panel.speaking = true;
-
-                const audio = new Audio();
-                panel.fallbackAudio = audio;
-                audio.preload = 'auto';
-
-                const done = () => {
-                    panel.speaking = false;
-                    panel.fallbackAudio = null;
-                    if (typeof onEnd === 'function') {
-                        onEnd();
-                    }
-                };
-
-                audio.onended = done;
-                audio.onerror = done;
-
-                try {
-                    audio.src = url;
-                    const playPromise = audio.play();
-                    if (playPromise && typeof playPromise.catch === 'function') {
-                        playPromise.catch(() => done());
-                    }
-                } catch (e) {
-                    done();
-                }
+                this.playServerAudio(panel, url, onEnd, onEnd);
             },
         };
     })();
@@ -991,6 +1292,11 @@
                 }
                 document.addEventListener('fullscreenchange', () => {
                     this.isFullscreen = Boolean(document.fullscreenElement);
+                });
+                window.addEventListener('tv-call-audio-blocked', (event) => {
+                    if (event.detail && event.detail.panelToken === token) {
+                        this.soundEnabled = false;
+                    }
                 });
             },
             async enableSound() {

@@ -24,6 +24,7 @@ class CallNextTicket
         private OperationalContext $operationalContext,
         private NextTicketSelector $nextTicketSelector,
         private UnitQueuePolicyResolver $policyResolver,
+        private WarmTicketCallAnnouncementAudio $announcementAudio,
     ) {}
 
     public function handle(User $actor): ?Ticket
@@ -113,6 +114,8 @@ class CallNextTicket
                 'call_type' => TicketCallType::INITIAL,
                 'called_at' => $calledAt,
             ])->save();
+
+            $this->announcementAudio->schedule($call);
 
             if ($policy !== null && $progress !== null) {
                 $this->policyResolver->recordCall($policy, $progress, $ticket);

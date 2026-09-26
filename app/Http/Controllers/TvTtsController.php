@@ -2,12 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\WarmTicketCallAnnouncementAudio;
 use App\Models\TicketCall;
-use App\Services\ClinicBranding;
-use App\Services\ClinicSettings;
 use App\Services\DisplayPanelFeed;
 use App\Services\TvTts\TvTtsService;
-use App\Support\TvPresentation;
 use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -18,8 +16,7 @@ class TvTtsController extends Controller
         int $ticketCall,
         DisplayPanelFeed $feed,
         TvTtsService $tts,
-        ClinicSettings $clinicSettings,
-        ClinicBranding $clinicBranding,
+        WarmTicketCallAnnouncementAudio $announcementAudio,
     ): BinaryFileResponse|Response {
         if (! $tts->isAvailable()) {
             return response('TTS unavailable', 503);
@@ -39,21 +36,15 @@ class TvTtsController extends Controller
             abort(404);
         }
 
-        $presentation = $panel->clinic !== null
-            ? TvPresentation::forClinic($panel->clinic, $clinicSettings, $clinicBranding)->toArray()
-            : [];
+        $call->setRelation('clinic', $panel->clinic);
 
-        $speakType = (bool) ($presentation['speak_ticket_type'] ?? true);
-        $speakDesk = (bool) ($presentation['speak_desk'] ?? true);
-        $text = $tts->announcementForCall($call, $speakType, $speakDesk);
-
-        $path = $tts->ensureCachedWav($text);
-        if ($path === null || ! is_file($path)) {
+        $path = $tts->ensureCachedWav($announcementAudio->announcementText($call));
+        if ($path === null || ! $tts->isServableCachePath($path)) {
             return response('TTS synthesis failed', 503);
         }
 
         return response()->file($path, [
-            'Content-Type' => 'audio/wav',
+            'Content-Type' => $tts->contentType(),
             'Cache-Control' => 'public, max-age=86400',
             'X-Content-Type-Options' => 'nosniff',
         ]);

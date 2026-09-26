@@ -11,15 +11,16 @@ return [
     | Tizen). Chrome/Edge keep using the native Web Speech API when the probe
     | succeeds — this driver is only a fallback audio stream.
     |
+    | Driver "google" uses Cloud Text-to-Speech (pt-BR MP3) and is the default.
     | Driver "espeak" requires the espeak-ng binary on the host (not bundled).
     | Install on Ubuntu 24.04: sudo apt-get install -y espeak-ng
-    | Do not enable until the binary is present; the app degrades gracefully.
+    | A missing driver degrades to silence; the visual call still works.
     |
     */
 
     'enabled' => (bool) env('TV_TTS_ENABLED', true),
 
-    'driver' => env('TV_TTS_DRIVER', 'espeak'),
+    'driver' => env('TV_TTS_DRIVER', 'google'),
 
     'espeak_binary' => env('TV_TTS_ESPEAK_BINARY', 'espeak-ng'),
 

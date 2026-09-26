@@ -22,6 +22,21 @@ class TicketCallVoiceFormatter
         '9' => 'nove',
     ];
 
+    /**
+     * Nouns that take "ao" (masculine). Anything else keeps "à", which matches Mesa.
+     *
+     * @var list<string>
+     */
+    private const MASCULINE_DESTINATIONS = [
+        'guiche',
+        'balcao',
+        'consultorio',
+        'box',
+        'posto',
+        'modulo',
+        'laboratorio',
+    ];
+
     public function announce(TicketCall $call, bool $includeType = true, bool $includeDesk = true): string
     {
         if (
@@ -33,32 +48,52 @@ class TicketCallVoiceFormatter
         }
 
         $typeName = mb_strtolower($call->ticket?->ticketType?->name ?? 'senha');
-        $code = $call->ticket?->display_code ?? '';
-        $deskName = $call->desk?->name ?? 'mesa';
-        $spelledCode = $this->spellCode($code);
+        $spelledCode = $this->spellCode($call->ticket?->display_code ?? '');
+        $lead = $includeType
+            ? trim('Senha '.$typeName.' '.$spelledCode)
+            : trim('Senha '.$spelledCode);
+        $sentence = $lead.'.';
 
-        if ($includeType && $includeDesk) {
-            return sprintf(
-                'Senha %s %s, dirigir-se à %s.',
-                $typeName,
-                $spelledCode,
-                $this->spellDeskName($deskName),
-            );
+        if (! $includeDesk) {
+            return $sentence;
         }
 
-        if ($includeType) {
-            return sprintf('Senha %s %s.', $typeName, $spelledCode);
+        return $sentence.' '.$this->destinationInstruction($call->desk?->name ?? 'mesa');
+    }
+
+    public function destinationInstruction(string $deskName): string
+    {
+        return sprintf(
+            'Dirigir-se %s %s.',
+            $this->destinationPreposition($deskName),
+            $this->spokenDestination($deskName),
+        );
+    }
+
+    public function destinationPreposition(string $deskName): string
+    {
+        $noun = $this->normalizeNoun($this->destinationNoun($deskName));
+
+        if (in_array($noun, self::MASCULINE_DESTINATIONS, true)) {
+            return 'ao';
         }
 
-        if ($includeDesk) {
-            return sprintf(
-                'Senha %s, dirigir-se à %s.',
-                $spelledCode,
-                $this->spellDeskName($deskName),
-            );
+        return 'à';
+    }
+
+    public function spokenDestination(string $deskName): string
+    {
+        $spoken = mb_strtolower(trim($this->spellDeskName($deskName)));
+
+        if ($spoken === '') {
+            return 'mesa';
         }
 
-        return sprintf('Senha %s.', $spelledCode);
+        if (preg_match('/\p{L}/u', $spoken) !== 1) {
+            return 'mesa '.$spoken;
+        }
+
+        return $spoken;
     }
 
     public function spellCode(string $code): string
@@ -92,6 +127,17 @@ class TicketCallVoiceFormatter
         return implode(' ', $parts);
     }
 
+    public function destinationNoun(string $deskName): string
+    {
+        $deskName = trim($deskName);
+
+        if (preg_match('/^\p{L}+/u', $deskName, $matches) === 1) {
+            return $matches[0];
+        }
+
+        return 'mesa';
+    }
+
     public function spellDeskName(string $deskName): string
     {
         $deskName = trim($deskName);
@@ -119,5 +165,20 @@ class TicketCallVoiceFormatter
             },
             $deskName,
         ) ?? $deskName;
+    }
+
+    private function normalizeNoun(string $word): string
+    {
+        $word = mb_strtolower(trim($word));
+        $word = strtr($word, [
+            'á' => 'a', 'à' => 'a', 'â' => 'a', 'ã' => 'a',
+            'é' => 'e', 'ê' => 'e',
+            'í' => 'i',
+            'ó' => 'o', 'ô' => 'o', 'õ' => 'o',
+            'ú' => 'u',
+            'ç' => 'c',
+        ]);
+
+        return preg_replace('/[^a-z]/', '', $word) ?? '';
     }
 }

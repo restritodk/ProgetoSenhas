@@ -26,6 +26,10 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 
+# Google Cloud service account keys (never commit)
+*service-account*.json
+*humana-clinica-tts.json
+
 # .NET / Humana Print Agent — build outputs (never commit)
 **/bin/
 **/obj/

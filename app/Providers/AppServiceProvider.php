@@ -14,6 +14,7 @@ use App\Models\TicketType;
 use App\Models\User;
 use App\Services\ClinicBranding;
 use App\Services\ClinicSettings;
+use App\Services\GoogleTextToSpeechService;
 use App\Services\OperationalContext;
 use App\Services\TvTts\EspeakNgSynthesizer;
 use App\Support\AdminNavigation;
@@ -32,7 +33,13 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->bind(TvSpeechSynthesizer::class, EspeakNgSynthesizer::class);
+        $this->app->bind(TvSpeechSynthesizer::class, function ($app): TvSpeechSynthesizer {
+            if (config('tv_tts.driver') === 'google') {
+                return $app->make(GoogleTextToSpeechService::class);
+            }
+
+            return $app->make(EspeakNgSynthesizer::class);
+        });
     }
 
     public function boot(): void

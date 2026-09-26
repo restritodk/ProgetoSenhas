@@ -15,36 +15,36 @@ class UnitQueuePolicy extends Model
     /** @use HasFactory<UnitQueuePolicyFactory> */
     use HasFactory;
 
-    public const int DEFAULT_AGING_INTERVAL_SECONDS = 60;
+    public const DEFAULT_AGING_INTERVAL_SECONDS = 60;
 
-    public const int DEFAULT_AGING_BONUS_PER_INTERVAL = 5;
+    public const DEFAULT_AGING_BONUS_PER_INTERVAL = 5;
 
-    public const int DEFAULT_DISTRIBUTION_SOURCE_COUNT = 3;
+    public const DEFAULT_DISTRIBUTION_SOURCE_COUNT = 3;
 
-    public const int DEFAULT_DISTRIBUTION_TARGET_COUNT = 1;
+    public const DEFAULT_DISTRIBUTION_TARGET_COUNT = 1;
 
-    public const int MIN_DISTRIBUTION_COUNT = 1;
+    public const MIN_DISTRIBUTION_COUNT = 1;
 
-    public const int MAX_DISTRIBUTION_COUNT = 50;
+    public const MAX_DISTRIBUTION_COUNT = 50;
 
-    public const int MIN_AGING_INTERVAL_SECONDS = 15;
+    public const MIN_AGING_INTERVAL_SECONDS = 15;
 
-    public const int MAX_AGING_INTERVAL_SECONDS = 3600;
+    public const MAX_AGING_INTERVAL_SECONDS = 3600;
 
-    public const int MIN_AGING_BONUS = 1;
+    public const MIN_AGING_BONUS = 1;
 
-    public const int MAX_AGING_BONUS = 100;
+    public const MAX_AGING_BONUS = 100;
 
-    public const int MIN_RESCUE_WAIT_SECONDS = 60;
+    public const MIN_RESCUE_WAIT_SECONDS = 60;
 
-    public const int MAX_RESCUE_WAIT_SECONDS = 86400;
+    public const MAX_RESCUE_WAIT_SECONDS = 86400;
 
     /** Default rescue wait by relative priority band (seconds). */
-    public const int DEFAULT_RESCUE_WAIT_LOW_PRIORITY = 900;
+    public const DEFAULT_RESCUE_WAIT_LOW_PRIORITY = 900;
 
-    public const int DEFAULT_RESCUE_WAIT_MID_PRIORITY = 1200;
+    public const DEFAULT_RESCUE_WAIT_MID_PRIORITY = 1200;
 
-    public const int DEFAULT_RESCUE_WAIT_HIGH_PRIORITY = 1800;
+    public const DEFAULT_RESCUE_WAIT_HIGH_PRIORITY = 1800;
 
     protected $fillable = [];
 

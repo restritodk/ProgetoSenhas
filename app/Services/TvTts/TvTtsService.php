@@ -8,6 +8,7 @@ use App\Models\TicketCall;
 use App\Services\TicketCallVoiceFormatter;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -24,11 +25,32 @@ class TvTtsService
     }
 
     /**
-     * Public URL for a panel-scoped call announcement audio (WAV).
-     *
-     * Emits the route when server TTS is enabled so the TV can fall back after
-     * speechSynthesis fails. Availability of the binary is checked at serve time.
+     * Public URL for a panel-scoped call announcement.
+     * The file is generated on first request and reused by hash. Polling does not synthesize.
      */
+    public function contentType(): string
+    {
+        return $this->synthesizer->contentType();
+    }
+
+    public function isServableCachePath(string $path): bool
+    {
+        if ($path === '' || ! is_file($path)) {
+            return false;
+        }
+
+        $real = realpath($path);
+        $root = realpath($this->disk()->path($this->cacheDirectory()));
+        if ($real === false || $root === false) {
+            return false;
+        }
+
+        $real = str_replace('\\', '/', $real);
+        $root = rtrim(str_replace('\\', '/', $root), '/').'/';
+
+        return str_starts_with($real, $root);
+    }
+
     public function audioUrlForCall(DisplayPanel $panel, TicketCall $call): ?string
     {
         if (! config('tv_tts.enabled', true)) {
@@ -44,10 +66,11 @@ class TvTtsService
             return null;
         }
 
+        // Relative: an absolute URL breaks when the TV reaches the host by IP or behind an HTTPS proxy (mixed content).
         return URL::route('tv.tts', [
             'publicToken' => $token,
             'ticketCall' => $call->id,
-        ], absolute: true);
+        ], absolute: false);
     }
 
     public function callBelongsToPanel(DisplayPanel $panel, TicketCall $call): bool
@@ -79,7 +102,7 @@ class TvTtsService
         $relative = $this->relativePath($hash);
         $disk = $this->disk();
 
-        if ($disk->exists($relative) && $disk->size($relative) > 44) {
+        if ($this->cachedFileIsUsable($disk, $relative)) {
             return $disk->path($relative);
         }
 
@@ -88,21 +111,30 @@ class TvTtsService
         try {
             $lock->block(10);
 
-            if ($disk->exists($relative) && $disk->size($relative) > 44) {
+            if ($this->cachedFileIsUsable($disk, $relative)) {
                 return $disk->path($relative);
             }
 
-            $wav = $this->synthesizer->synthesizeWav($text);
-            if ($wav === '' || strlen($wav) < 44) {
+            $audio = $this->synthesizer->synthesizeWav($text);
+            if ($audio === '' || strlen($audio) < 44) {
+                Log::warning('tv.tts.synthesis_empty', [
+                    'hash' => $hash,
+                ]);
+
                 return null;
             }
 
-            $disk->makeDirectory(trim((string) config('tv_tts.cache_directory'), '/'));
-            $disk->put($relative, $wav);
+            $disk->makeDirectory($this->cacheDirectory());
+            $disk->put($relative, $audio);
             $this->pruneCache($disk);
 
             return $disk->path($relative);
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            Log::warning('tv.tts.cache_failed', [
+                'exception' => $exception::class,
+                'hash' => $hash,
+            ]);
+
             return null;
         } finally {
             try {
@@ -120,17 +152,49 @@ class TvTtsService
 
     public function cacheKey(string $text): string
     {
-        $voice = (string) config('tv_tts.voice', 'pt');
-        $rate = (int) config('tv_tts.rate', 145);
-
-        return hash('sha256', 'v1|'.$voice.'|'.$rate.'|'.$text);
+        return hash('sha256', implode('|', [
+            'v2',
+            $this->safeExtension(),
+            (string) config('services.google_tts.language_code', 'pt-BR'),
+            (string) config('services.google_tts.voice_name', ''),
+            (string) config('services.google_tts.speaking_rate', '1.0'),
+            (string) config('tv_tts.voice', 'pt'),
+            (string) config('tv_tts.rate', 145),
+            $text,
+        ]));
     }
 
     private function relativePath(string $hash): string
     {
-        $dir = trim((string) config('tv_tts.cache_directory', 'tv-tts'), '/');
+        if (! preg_match('/^[a-f0-9]{64}$/', $hash)) {
+            $hash = hash('sha256', $hash);
+        }
 
-        return $dir.'/'.$hash.'.wav';
+        return $this->cacheDirectory().'/'.$hash.'.'.$this->safeExtension();
+    }
+
+    private function safeExtension(): string
+    {
+        $extension = $this->synthesizer->fileExtension();
+
+        return in_array($extension, ['wav', 'mp3'], true) ? $extension : 'wav';
+    }
+
+    private function cacheDirectory(): string
+    {
+        $dir = trim((string) config('tv_tts.cache_directory', 'tv-tts'), '/\\');
+        $dir = str_replace('\\', '/', $dir);
+
+        if ($dir === '' || str_contains($dir, '..') || str_contains($dir, ':')) {
+            return 'tv-tts';
+        }
+
+        return $dir;
+    }
+
+    private function cachedFileIsUsable(Filesystem $disk, string $relative): bool
+    {
+        return $disk->exists($relative) && $disk->size($relative) > 44;
     }
 
     private function disk(): Filesystem
@@ -140,14 +204,14 @@ class TvTtsService
 
     private function pruneCache(Filesystem $disk): void
     {
-        $dir = trim((string) config('tv_tts.cache_directory', 'tv-tts'), '/');
+        $dir = $this->cacheDirectory();
         $maxFiles = max(50, (int) config('tv_tts.cache_max_files', 400));
         $maxAgeDays = max(1, (int) config('tv_tts.cache_max_age_days', 30));
         $cutoff = now()->subDays($maxAgeDays)->getTimestamp();
 
         try {
             $files = collect($disk->files($dir))
-                ->filter(fn (string $path): bool => str_ends_with($path, '.wav'))
+                ->filter(fn (string $path): bool => $this->isCachedAudioPath($path))
                 ->map(function (string $path) use ($disk): array {
                     return [
                         'path' => $path,
@@ -167,7 +231,7 @@ class TvTtsService
         }
 
         $remaining = collect($disk->files($dir))
-            ->filter(fn (string $path): bool => str_ends_with($path, '.wav'))
+            ->filter(fn (string $path): bool => $this->isCachedAudioPath($path))
             ->map(fn (string $path): array => [
                 'path' => $path,
                 'mtime' => $disk->lastModified($path) ?: 0,
@@ -183,5 +247,10 @@ class TvTtsService
         foreach ($remaining->take($overflow) as $file) {
             $disk->delete($file['path']);
         }
+    }
+
+    private function isCachedAudioPath(string $path): bool
+    {
+        return str_ends_with($path, '.wav') || str_ends_with($path, '.mp3');
     }
 }

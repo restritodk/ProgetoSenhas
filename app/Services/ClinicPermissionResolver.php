@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Cache;
 
 class ClinicPermissionResolver
 {
-    private const int CACHE_SECONDS = 3600;
+    private const CACHE_SECONDS = 3600;
 
     /**
      * @return list<string>
